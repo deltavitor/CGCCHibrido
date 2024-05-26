@@ -6,10 +6,22 @@
  * Última atualização em 12/05/2023
  *
  */
+#define STB_IMAGE_IMPLEMENTATION
+#include "../../Common/include/stb_image.h"
 
 #include <iostream>
 #include <string>
 #include <assert.h>
+#include <fstream>
+#include <sstream>
+#include <vector>
+
+// Um struct auxiliar para facilitar a criação dos floats com os atributos dos vertices
+struct Vertex {
+	float x, y, z;		// Positioning
+	float s, t;			// Texture
+	float r, g, b;		// Color
+};
 
 using namespace std;
 
@@ -29,8 +41,11 @@ using namespace std;
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode);
 
 // Protótipos das funções
+GLuint setupTexture(string path);
+vector<Vertex> setupObj(string path);
+string setupMtl(string path);
 int setupShader();
-int setupGeometry();
+int setupGeometry(vector<Vertex>& vertices);
 
 // Dimensões da janela (pode ser alterado em tempo de execução)
 const GLuint WIDTH = 1000, HEIGHT = 1000;
@@ -38,37 +53,32 @@ const GLuint WIDTH = 1000, HEIGHT = 1000;
 // Código fonte do Vertex Shader (em GLSL): ainda hardcoded
 const GLchar* vertexShaderSource = "#version 450\n"
 "layout (location = 0) in vec3 position;\n"
-"layout (location = 1) in vec3 color;\n"
+"layout (location = 1) in vec2 texCoord;\n"
+"layout (location = 2) in vec3 color;\n"
 "uniform mat4 model;\n"
 "out vec4 finalColor;\n"
+"out vec2 finalTexCoord;\n"
 "void main()\n"
 "{\n"
-//...pode ter mais linhas de código aqui!
 "gl_Position = model * vec4(position, 1.0);\n"
 "finalColor = vec4(color, 1.0);\n"
+"finalTexCoord = texCoord;\n"
 "}\0";
 
 //Códifo fonte do Fragment Shader (em GLSL): ainda hardcoded
 const GLchar* fragmentShaderSource = "#version 450\n"
+"in vec2 finalTexCoord;\n"
 "in vec4 finalColor;\n"
+"uniform sampler2D texture1;\n"
 "out vec4 color;\n"
 "void main()\n"
 "{\n"
-"color = finalColor;\n"
+"color = texture(texture1, finalTexCoord); // Por enquanto, os valores de cor não são usados\n"
 "}\n\0";
 
 bool rotateX=false, rotateY=false, rotateZ=false;
 float translateX = 0.0f, translateY = 0.0f, translateZ = 0.0f;
 float scale = 0.4f;
-// Array usado para renderizar os cubos com suas posições
-float cubes[] = {
-	// Cubo 1
-	0.0f, 0.0f, 0.0f,
-	// Cubo 2
-	1.1f, 1.1f, 1.1f,
-	//Cubo 3
-	-1.1f, -1.1f, -1.1f
-};
 
 // Função MAIN
 int main()
@@ -114,13 +124,18 @@ int main()
 	glfwGetFramebufferSize(window, &width, &height);
 	glViewport(0, 0, width, height);
 
-
 	// Compilando e buildando o programa de shader
 	GLuint shaderID = setupShader();
 
-	// Gerando um buffer simples, com a geometria de um triângulo
-	GLuint VAO = setupGeometry();
+	vector<Vertex> vertices = setupObj("../../3D_Models/Suzanne/SuzanneTriTextured.obj");
+	GLuint VAO = setupGeometry(vertices);
 
+	// Será diferente no futuro quando os outros atributos do mtl forem incorporados
+	string textureName = setupMtl("../../3D_Models/Suzanne/SuzanneTriTextured.mtl");
+	GLuint textureID = setupTexture(textureName);
+
+	glUseProgram(shaderID);
+	glUniform1i(glGetUniformLocation(shaderID, "texture1"), 0);
 
 	glUseProgram(shaderID);
 
@@ -149,50 +164,47 @@ int main()
 		glClearColor(1.0f, 1.0f, 1.0f, 1.0f); //cor de fundo
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		glLineWidth(10);
-		glPointSize(20);
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, textureID);
+
+		//glLineWidth(10);
+		//glPointSize(20);
 
 		float angle = (GLfloat)glfwGetTime();
 
-		for (int i = 0; i < sizeof(cubes) / sizeof(float); i += 3) {
-			model = glm::mat4(1);
+		model = glm::mat4(1);
 
-			scaleModel = glm::vec3(scale, scale, scale);
-			model = glm::scale(model, scaleModel);
+		scaleModel = glm::vec3(scale, scale, scale);
+		model = glm::scale(model, scaleModel);
 
-			if (rotateX)
-			{
-				model = glm::rotate(model, angle, glm::vec3(1.0f, 0.0f, 0.0f));
+		if (rotateX)
+		{
+			model = glm::rotate(model, angle, glm::vec3(1.0f, 0.0f, 0.0f));
 
-			}
-			else if (rotateY)
-			{
-				model = glm::rotate(model, angle, glm::vec3(0.0f, 1.0f, 0.0f));
-
-			}
-			else if (rotateZ)
-			{
-				model = glm::rotate(model, angle, glm::vec3(0.0f, 0.0f, 1.0f));
-
-			}
-
-			// O cálculo da posição leva em conta o valor digitado pelo teclado (translateX, Y e Z) + os valores de cada cubo do array
-			// de cubos
-			translationModel = glm::vec3(translateX + cubes[i + 0], translateY + cubes[i + 1], translateZ + cubes[i + 2]);
-			model = glm::translate(model, translationModel);
-
-			glUniformMatrix4fv(modelLoc, 1, FALSE, glm::value_ptr(model));
-			// Chamada de desenho - drawcall
-			// Poligono Preenchido - GL_TRIANGLES
-
-			glBindVertexArray(VAO);
-			glDrawArrays(GL_TRIANGLES, 0, 36);
-
-			// Chamada de desenho - drawcall
-			// CONTORNO - GL_LINE_LOOP
-
-			glDrawArrays(GL_POINTS, 0, 36);
 		}
+		else if (rotateY)
+		{
+			model = glm::rotate(model, angle, glm::vec3(0.0f, 1.0f, 0.0f));
+
+		}
+		else if (rotateZ)
+		{
+			model = glm::rotate(model, angle, glm::vec3(0.0f, 0.0f, 1.0f));
+
+		}
+
+		// O cálculo da posição leva em conta o valor digitado pelo teclado (translateX, Y e Z) + os valores de cada cubo do array
+		// de cubos
+		//translationModel = glm::vec3(translateX + cubes[i + 0], translateY + cubes[i + 1], translateZ + cubes[i + 2]);
+		//model = glm::translate(model, translationModel);
+
+		glUniformMatrix4fv(modelLoc, 1, FALSE, glm::value_ptr(model));
+		// Chamada de desenho - drawcall
+		// Poligono Preenchido - GL_TRIANGLES
+
+		glBindVertexArray(VAO);
+		glDrawArrays(GL_TRIANGLES, 0, vertices.size() * 2);
+
 		glBindVertexArray(0);
 
 		// Troca os buffers da tela
@@ -203,6 +215,127 @@ int main()
 	// Finaliza a execução da GLFW, limpando os recursos alocados por ela
 	glfwTerminate();
 	return 0;
+}
+
+vector<Vertex> setupObj(string path) {
+	vector<Vertex> vertices;
+	ifstream file(path);
+	string line;
+	vector<glm::vec3> temp_positions;
+	vector<glm::vec2> temp_texcoords;
+
+	if (!file.is_open()) {
+		cerr << "Failed to open file" << path << endl;
+		return vertices;
+	}
+
+	while (getline(file, line)) {
+		istringstream ss(line);
+		string type;
+		ss >> type;
+
+		if (type == "v") {
+			glm::vec3 position;
+			ss >> position.x >> position.y >> position.z;
+			temp_positions.push_back(position);
+		}
+		else if (type == "vt") {
+			glm::vec2 texcoord;
+			ss >> texcoord.x >> texcoord.y;
+			temp_texcoords.push_back(texcoord);
+		}
+		else if (type == "f") {
+			string vertex1, vertex2, vertex3;
+			ss >> vertex1 >> vertex2 >> vertex3;
+			int vIndex[3], tIndex[3], nIndex[3];
+
+			for (int i = 0; i < 3; i++) {
+				string vertex = (i == 0) ? vertex1 : (i == 1) ? vertex2 : vertex3;
+				size_t pos1 = vertex.find('/');
+				size_t pos2 = vertex.find('/', pos1 + 1);
+
+				vIndex[i] = stoi(vertex.substr(0, pos1)) - 1;
+				tIndex[i] = stoi(vertex.substr(pos1 + 1, pos2 - pos1 - 1)) - 1;
+				nIndex[i] = stoi(vertex.substr(pos2 + 1)) - 1;
+			}
+
+			for (int i = 0; i < 3; i++) {
+				Vertex vertex;
+				vertex.x = temp_positions[vIndex[i]].x;
+				vertex.y = temp_positions[vIndex[i]].y;
+				vertex.z = temp_positions[vIndex[i]].z;
+
+				vertex.s = temp_texcoords[tIndex[i]].x;
+				vertex.t = temp_texcoords[tIndex[i]].y;
+
+				vertices.push_back(vertex);
+			}
+		}
+	}
+
+	file.close();
+	return vertices;
+}
+
+// Por enquanto, estou lendo apenas o nome da textura e retornando esse valor, mas acho que no futuro essa função
+// Ira retornar algo diferente que contenha as outras informações do mtl
+string setupMtl(string path) {
+	string texturePath;
+	ifstream file(path);
+	string line;
+
+	if (!file.is_open()) {
+		cerr << "Failed to open file" << path << endl;
+		return "";
+	}
+
+	while (getline(file, line)) {
+		istringstream ss(line);
+		string type;
+		ss >> type;
+
+		if (type == "map_Kd") {
+			ss >> texturePath;
+		}
+	}
+
+	file.close();
+	return texturePath;
+}
+
+GLuint setupTexture(string filename) {
+	GLuint textureId;
+	glGenTextures(1, &textureId);
+	glBindTexture(GL_TEXTURE_2D, textureId);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	stbi_set_flip_vertically_on_load(true);
+
+	int width, height, nrChannels;
+	unsigned char* data = stbi_load(filename.c_str(), &width, &height, &nrChannels, 0);
+	if (data) {
+		if (nrChannels == 3) //jpg, bmp
+		{
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+		}
+		else //png
+		{
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+		}
+		glGenerateMipmap(GL_TEXTURE_2D); // geração do mipmap
+	}
+	else {
+		std::cout << "Failed to load texture" << std::endl;
+		
+	}
+
+	stbi_image_free(data);
+
+	return textureId;
 }
 
 // Função de callback de teclado - só pode ter uma instância (deve ser estática se
@@ -326,111 +459,29 @@ int setupShader()
 // Apenas atributo coordenada nos vértices
 // 1 VBO com as coordenadas, VAO com apenas 1 ponteiro para atributo
 // A função retorna o identificador do VAO
-int setupGeometry()
-{
-	// Aqui setamos as coordenadas x, y e z do triângulo e as armazenamos de forma
-	// sequencial, já visando mandar para o VBO (Vertex Buffer Objects)
-	// Cada atributo do vértice (coordenada, cores, coordenadas de textura, normal, etc)
-	// Pode ser arazenado em um VBO único ou em VBOs separados
-	GLfloat vertices[] = {
-
-		//x    y    z    r    g    b
-		// Base - vermelho
-		  -0.5, -0.5, -0.5, 1.0, 0.0, 0.0,
-		  -0.5, -0.5,  0.5, 1.0, 0.0, 0.0,
-		   0.5, -0.5, -0.5, 1.0, 0.0, 0.0,
-
-		  -0.5, -0.5,  0.5, 1.0, 0.0, 0.0,
-		   0.5, -0.5,  0.5, 1.0, 0.0, 0.0,
-		   0.5, -0.5, -0.5, 1.0, 0.0, 0.0,
-
-		 // Topo - verde
-		   0.5, 0.5,  0.5, 0.0, 1.0, 0.0,
-		   0.5, 0.5, -0.5, 0.0, 1.0, 0.0,
-		  -0.5, 0.5,  0.5, 0.0, 1.0, 0.0,
-
-		   0.5, 0.5, -0.5, 0.0, 1.0, 0.0,
-		  -0.5, 0.5, -0.5, 0.0, 1.0, 0.0,
-		  -0.5, 0.5,  0.5, 0.0, 1.0, 0.0,
-
-		  // Lado 1
-		  0.5, -0.5,  0.5, 0.0, 0.0, 1.0,
-		  0.5,  0.5,  0.5, 0.0, 0.0, 1.0,
-		  0.5, -0.5, -0.5, 0.0, 0.0, 1.0,
-
-		  0.5,  0.5, -0.5, 0.0, 0.0, 1.0,
-		  0.5, -0.5, -0.5, 0.0, 0.0, 1.0,
-		  0.5,  0.5,  0.5, 0.0, 0.0, 1.0,
-
-		  // Lado 2
-		  -0.5, -0.5,  0.5, 1.0, 1.0, 0.0,
-		  -0.5,  0.5,  0.5, 1.0, 1.0, 0.0,
-		  -0.5, -0.5, -0.5, 1.0, 1.0, 0.0,
-
-		  -0.5,  0.5, -0.5, 1.0, 1.0, 0.0,
-		  -0.5, -0.5, -0.5, 1.0, 1.0, 0.0,
-		  -0.5,  0.5,  0.5, 1.0, 1.0, 0.0,
-
-		  // Lado 3
-		   0.5,  0.5,  0.5, 0.0, 1.0, 1.0,
-		   0.5, -0.5,  0.5, 0.0, 1.0, 1.0,
-		  -0.5,  0.5,  0.5, 0.0, 1.0, 1.0,
-
-		  -0.5, -0.5, 0.5, 0.0, 1.0, 1.0,
-		  -0.5,  0.5, 0.5, 0.0, 1.0, 1.0,
-		   0.5, -0.5, 0.5, 0.0, 1.0, 1.0,
-
-		   // Lado 4
-		  -0.5, -0.5, -0.5, 1.0, 0.0, 1.0,
-		  -0.5,  0.5, -0.5, 1.0, 0.0, 1.0,
-		   0.5, -0.5, -0.5, 1.0, 0.0, 1.0,
-
-		   0.5,  0.5, -0.5, 1.0, 0.0, 1.0,
-		   0.5, -0.5, -0.5, 1.0, 0.0, 1.0,
-		  -0.5,  0.5, -0.5, 1.0, 0.0, 1.0,
-	};
-
+int setupGeometry(vector<Vertex>& vertices) {
 	GLuint VBO, VAO;
 
-	//Geração do identificador do VBO
 	glGenBuffers(1, &VBO);
-
-	//Faz a conexão (vincula) do buffer como um buffer de array
 	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), &vertices[0], GL_STATIC_DRAW);
 
-	//Envia os dados do array de floats para o buffer da OpenGl
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-	//Geração do identificador do VAO (Vertex Array Object)
 	glGenVertexArrays(1, &VAO);
-
-	// Vincula (bind) o VAO primeiro, e em seguida  conecta e seta o(s) buffer(s) de vértices
-	// e os ponteiros para os atributos 
 	glBindVertexArray(VAO);
-	
-	//Para cada atributo do vertice, criamos um "AttribPointer" (ponteiro para o atributo), indicando: 
-	// Localização no shader * (a localização dos atributos devem ser correspondentes no layout especificado no vertex shader)
-	// Numero de valores que o atributo tem (por ex, 3 coordenadas xyz) 
-	// Tipo do dado
-	// Se está normalizado (entre zero e um)
-	// Tamanho em bytes 
-	// Deslocamento a partir do byte zero 
-	
-	//Atributo posição (x, y, z)
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (GLvoid*)0);
+
+	// Positioning
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid*)0);
 	glEnableVertexAttribArray(0);
 
-	//Atributo cor (r, g, b)
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (GLvoid*)(3*sizeof(GLfloat)));
+	// Texture
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid*)(3 * sizeof(GLfloat)));
 	glEnableVertexAttribArray(1);
 
+	// Color
+	glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid*)(5 * sizeof(GLfloat)));
+	glEnableVertexAttribArray(2);
 
-
-	// Observe que isso é permitido, a chamada para glVertexAttribPointer registrou o VBO como o objeto de buffer de vértice 
-	// atualmente vinculado - para que depois possamos desvincular com segurança
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-	// Desvincula o VAO (é uma boa prática desvincular qualquer buffer ou array para evitar bugs medonhos)
 	glBindVertexArray(0);
 
 	return VAO;

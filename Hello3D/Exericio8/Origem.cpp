@@ -21,6 +21,15 @@ struct Vertex {
 	float x, y, z;		// Positioning
 	float s, t;			// Texture
 	float r, g, b;		// Color
+	float nx, ny, nz;   // Normal
+};
+
+struct Material {
+	float kaR, kaG, kaB;   // Ka
+	float kdR, kdG, kdB;   // Kd
+	float ksR, ksG, ksB;   // Ks
+	float ns;     
+	std::string textureName; // map_Kd
 };
 
 using namespace std;
@@ -43,7 +52,8 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 // Protótipos das funções
 GLuint setupTexture(string path);
 vector<Vertex> setupObj(string path);
-string setupMtl(string path);
+Material setupMtl(string path);
+void setupMtlUniforms(GLuint shaderProgram, Material material);
 int setupShader();
 int setupGeometry(vector<Vertex>& vertices);
 
@@ -55,30 +65,55 @@ const GLchar* vertexShaderSource = "#version 450\n"
 "layout (location = 0) in vec3 position;\n"
 "layout (location = 1) in vec2 texCoord;\n"
 "layout (location = 2) in vec3 color;\n"
+"layout (location = 3) in vec3 normal;\n"
 "uniform mat4 model;\n"
+"out vec3 fragPos;\n"
 "out vec4 finalColor;\n"
 "out vec2 finalTexCoord;\n"
+"out vec3 scaledNormal;\n"
 "void main()\n"
 "{\n"
-"gl_Position = model * vec4(position, 1.0);\n"
+"fragPos = vec3(model * vec4(position, 1.0));\n"
+"gl_Position = vec4(fragPos, 1.0);\n"
 "finalColor = vec4(color, 1.0);\n"
 "finalTexCoord = texCoord;\n"
+"scaledNormal = normal;\n"
 "}\0";
 
 //Códifo fonte do Fragment Shader (em GLSL): ainda hardcoded
 const GLchar* fragmentShaderSource = "#version 450\n"
+"in vec3 fragPos;\n"
 "in vec2 finalTexCoord;\n"
 "in vec4 finalColor;\n"
+"in vec3 scaledNormal;\n"
 "uniform sampler2D texture1;\n"
+"uniform float kaR, kaG, kaB;\n"
+"uniform float kdR, kdG, kdB;\n"
+"uniform float ksR, ksG, ksB;\n"
+"uniform float ns;\n"
+"uniform vec3 lightPos;\n"
+"uniform vec3 lightColor;\n"
 "out vec4 color;\n"
 "void main()\n"
 "{\n"
-"color = texture(texture1, finalTexCoord); // Por enquanto, os valores de cor não são usados\n"
+"vec3 ambient = vec3(kaR, kaG, kaB) * lightColor;\n"
+"vec3 N = normalize(scaledNormal);\n"
+"vec3 L = normalize(lightPos - fragPos);\n"
+"float diff = max(dot(N, L), 0.0);\n"
+"vec3 diffuse = vec3(kdR, kdG, kdB) * diff * lightColor;\n"
+"vec3 V = normalize(fragPos);\n"
+"vec3 R = normalize(reflect(-L, N));\n"
+"float spec = max(dot(R, V), 0.0);\n"
+"spec = pow(spec, ns);\n"
+"vec3 specular = vec3(ksR, ksG, ksB) * spec * lightColor;\n"
+"vec4 finalTexture = texture(texture1, finalTexCoord);\n"
+"vec3 result = (ambient + diffuse) * vec3(finalTexture.r, finalTexture.g, finalTexture.b) + specular;\n"
+"color = vec4(result, 1.0);\n"
 "}\n\0";
 
 bool rotateX=false, rotateY=false, rotateZ=false;
 float translateX = 0.0f, translateY = 0.0f, translateZ = 0.0f;
-float scale = 0.4f;
+float scale = 0.3f;
 
 // Função MAIN
 int main()
@@ -130,14 +165,17 @@ int main()
 	vector<Vertex> vertices = setupObj("../../3D_Models/Suzanne/SuzanneTriTextured.obj");
 	GLuint VAO = setupGeometry(vertices);
 
-	// Será diferente no futuro quando os outros atributos do mtl forem incorporados
-	string textureName = setupMtl("../../3D_Models/Suzanne/SuzanneTriTextured.mtl");
-	GLuint textureID = setupTexture(textureName);
+	Material material = setupMtl("../../3D_Models/Suzanne/SuzanneTriTextured.mtl");
+	GLuint textureID = setupTexture(material.textureName);
 
 	glUseProgram(shaderID);
 	glUniform1i(glGetUniformLocation(shaderID, "texture1"), 0);
 
-	glUseProgram(shaderID);
+	setupMtlUniforms(shaderID, material);
+	// Com esses valores, a SuzanneTriTextured fica com o rosto iluminado
+	glUniform3f(glGetUniformLocation(shaderID, "lightPos"), 2.0f, 5.0f, -10.0f);
+	glUniform3f(glGetUniformLocation(shaderID, "lightColor"), 1.0f, 1.0f, 0.0f);
+
 
 	glm::mat4 model = glm::mat4(1); //matriz identidade;
 	GLint modelLoc = glGetUniformLocation(shaderID, "model");
@@ -223,6 +261,7 @@ vector<Vertex> setupObj(string path) {
 	string line;
 	vector<glm::vec3> temp_positions;
 	vector<glm::vec2> temp_texcoords;
+	vector<glm::vec3> temp_normals;
 
 	if (!file.is_open()) {
 		cerr << "Failed to open file" << path << endl;
@@ -243,6 +282,11 @@ vector<Vertex> setupObj(string path) {
 			glm::vec2 texcoord;
 			ss >> texcoord.x >> texcoord.y;
 			temp_texcoords.push_back(texcoord);
+		}
+		else if (type == "vn") {
+			glm::vec3 normal;
+			ss >> normal.x >> normal.y >> normal.z;
+			temp_normals.push_back(normal);
 		}
 		else if (type == "f") {
 			string vertex1, vertex2, vertex3;
@@ -268,6 +312,10 @@ vector<Vertex> setupObj(string path) {
 				vertex.s = temp_texcoords[tIndex[i]].x;
 				vertex.t = temp_texcoords[tIndex[i]].y;
 
+				vertex.nx = temp_normals[nIndex[i]].x;
+				vertex.ny = temp_normals[nIndex[i]].y;
+				vertex.nz = temp_normals[nIndex[i]].z;
+
 				vertices.push_back(vertex);
 			}
 		}
@@ -277,16 +325,15 @@ vector<Vertex> setupObj(string path) {
 	return vertices;
 }
 
-// Por enquanto, estou lendo apenas o nome da textura e retornando esse valor, mas acho que no futuro essa função
-// Ira retornar algo diferente que contenha as outras informações do mtl
-string setupMtl(string path) {
+Material setupMtl(string path) {
 	string texturePath;
 	ifstream file(path);
 	string line;
+	Material material;
 
 	if (!file.is_open()) {
 		cerr << "Failed to open file" << path << endl;
-		return "";
+		return material;
 	}
 
 	while (getline(file, line)) {
@@ -294,13 +341,38 @@ string setupMtl(string path) {
 		string type;
 		ss >> type;
 
-		if (type == "map_Kd") {
-			ss >> texturePath;
+		if (type == "Ka") {
+			ss >> material.kaR >> material.kaG >> material.kaB;
+		}
+		else if (type == "Kd") {
+			ss >> material.kdR >> material.kdG >> material.kdB;
+		}
+		else if (type == "Ks") {
+			ss >> material.ksR >> material.ksG >> material.ksB;
+		}
+		else if (type == "Ns") {
+			ss >> material.ns;
+		}
+		else if (type == "map_Kd") {
+			ss >> material.textureName;
 		}
 	}
 
 	file.close();
-	return texturePath;
+	return material;
+}
+
+void setupMtlUniforms(GLuint shaderProgram, Material material) {
+	glUniform1f(glGetUniformLocation(shaderProgram, "kaR"), material.kaR);
+	glUniform1f(glGetUniformLocation(shaderProgram, "kaG"), material.kaG);
+	glUniform1f(glGetUniformLocation(shaderProgram, "kaB"), material.kaB);
+	glUniform1f(glGetUniformLocation(shaderProgram, "kdR"), material.kdR);
+	glUniform1f(glGetUniformLocation(shaderProgram, "kdG"), material.kdG);
+	glUniform1f(glGetUniformLocation(shaderProgram, "kdB"), material.kdB);
+	glUniform1f(glGetUniformLocation(shaderProgram, "ksR"), material.ksR);
+	glUniform1f(glGetUniformLocation(shaderProgram, "ksG"), material.ksG);
+	glUniform1f(glGetUniformLocation(shaderProgram, "ksB"), material.ksB);
+	glUniform1f(glGetUniformLocation(shaderProgram, "ns"), material.ns);
 }
 
 GLuint setupTexture(string filename) {
@@ -369,11 +441,11 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 	// na prática, se usa [ para aumentar e ´ para diminuir. Creio que isso ocorre em função
 	// das diferenças no teclado americano e o ABNT
 	if (key == GLFW_KEY_LEFT_BRACKET && action == GLFW_PRESS) {
-		if (scale > 0.1f) scale -= 0.1f;
+		if (scale > 0.01f) scale -= 0.01f;
 	}
 
 	if (key == GLFW_KEY_RIGHT_BRACKET && action == GLFW_PRESS) {
-		if (scale < 2.0f) scale += 0.1f;
+		if (scale < 2.0f) scale += 0.01f;
 	}
 
 	if (key == GLFW_KEY_A && action == GLFW_PRESS) {
@@ -480,6 +552,10 @@ int setupGeometry(vector<Vertex>& vertices) {
 	// Color
 	glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid*)(5 * sizeof(GLfloat)));
 	glEnableVertexAttribArray(2);
+
+	// Normal
+	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid*)(8 * sizeof(GLfloat)));
+	glEnableVertexAttribArray(3);
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);

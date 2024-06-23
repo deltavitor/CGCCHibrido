@@ -46,8 +46,8 @@ using namespace std;
 #include <glm/gtc/type_ptr.hpp>
 
 
-// Protótipo da função de callback de teclado
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode);
+void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 
 // Protótipos das funções
 GLuint setupTexture(string path);
@@ -67,14 +67,16 @@ const GLchar* vertexShaderSource = "#version 450\n"
 "layout (location = 2) in vec3 color;\n"
 "layout (location = 3) in vec3 normal;\n"
 "uniform mat4 model;\n"
+"uniform mat4 view;\n"
+"uniform mat4 projection;\n"
 "out vec3 fragPos;\n"
 "out vec4 finalColor;\n"
 "out vec2 finalTexCoord;\n"
 "out vec3 scaledNormal;\n"
 "void main()\n"
 "{\n"
+"gl_Position = projection * view * model * vec4(position, 1.0);\n"
 "fragPos = vec3(model * vec4(position, 1.0));\n"
-"gl_Position = vec4(fragPos, 1.0);\n"
 "finalColor = vec4(color, 1.0);\n"
 "finalTexCoord = texCoord;\n"
 "scaledNormal = normal;\n"
@@ -93,6 +95,7 @@ const GLchar* fragmentShaderSource = "#version 450\n"
 "uniform float ns;\n"
 "uniform vec3 lightPos;\n"
 "uniform vec3 lightColor;\n"
+"uniform vec3 cameraPos;\n"
 "out vec4 color;\n"
 "void main()\n"
 "{\n"
@@ -101,7 +104,7 @@ const GLchar* fragmentShaderSource = "#version 450\n"
 "vec3 L = normalize(lightPos - fragPos);\n"
 "float diff = max(dot(N, L), 0.0);\n"
 "vec3 diffuse = vec3(kdR, kdG, kdB) * diff * lightColor;\n"
-"vec3 V = normalize(fragPos);\n"
+"vec3 V = normalize(cameraPos - fragPos);\n"
 "vec3 R = normalize(reflect(-L, N));\n"
 "float spec = max(dot(R, V), 0.0);\n"
 "spec = pow(spec, ns);\n"
@@ -114,6 +117,17 @@ const GLchar* fragmentShaderSource = "#version 450\n"
 bool rotateX=false, rotateY=false, rotateZ=false;
 float translateX = 0.0f, translateY = 0.0f, translateZ = 0.0f;
 float scale = 0.3f;
+
+glm::vec3 cameraPos = glm::vec3(0.0, 0.0, 3.0);
+glm::vec3 cameraFront = glm::vec3(0.0, 0.0, -3.0);
+glm::vec3 cameraUp = glm::vec3(0.0, 1.0, 0.0);
+bool firstMouse = true;
+float lastX, lastY;
+float sensitivity = 0.05;
+float cameraSpeed = 0.02f;
+float pitch = 0.0, yaw = -90.0;
+
+bool moveW = false, moveA = false, moveS = false, moveD = false;
 
 // Função MAIN
 int main()
@@ -140,6 +154,10 @@ int main()
 
 	// Fazendo o registro da função de callback para a janela GLFW
 	glfwSetKeyCallback(window, key_callback);
+	glfwSetCursorPosCallback(window, mouse_callback);
+
+	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+	glfwSetInputMode(window, GLFW_STICKY_KEYS, GLFW_TRUE);
 
 	// GLAD: carrega todos os ponteiros d funções da OpenGL
 	if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
@@ -162,10 +180,10 @@ int main()
 	// Compilando e buildando o programa de shader
 	GLuint shaderID = setupShader();
 
-	vector<Vertex> vertices = setupObj("../../3D_Models/Suzanne/SuzanneTriTextured.obj");
+	vector<Vertex> vertices = setupObj("../../3D_Models/Suzanne/bola.obj");
 	GLuint VAO = setupGeometry(vertices);
 
-	Material material = setupMtl("../../3D_Models/Suzanne/SuzanneTriTextured.mtl");
+	Material material = setupMtl("../../3D_Models/Suzanne/bola.mtl");
 	GLuint textureID = setupTexture(material.textureName);
 
 	glUseProgram(shaderID);
@@ -174,8 +192,14 @@ int main()
 	setupMtlUniforms(shaderID, material);
 	// Com esses valores, a SuzanneTriTextured fica com o rosto iluminado
 	glUniform3f(glGetUniformLocation(shaderID, "lightPos"), 2.0f, 5.0f, -10.0f);
-	glUniform3f(glGetUniformLocation(shaderID, "lightColor"), 1.0f, 1.0f, 0.0f);
+	glUniform3f(glGetUniformLocation(shaderID, "lightColor"), 1.0f, 1.0f, 1.0f);
 
+	// Câmera
+	glm::mat4 view = glm::lookAt(glm::vec3(0.0, 0.0, 3.0), glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
+	glUniformMatrix4fv(glGetUniformLocation(shaderID, "view"), 1, GL_FALSE, glm::value_ptr(view));
+
+	glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)width / (float)height, 0.1f, 100.0f);
+	glUniformMatrix4fv(glGetUniformLocation(shaderID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
 	glm::mat4 model = glm::mat4(1); //matriz identidade;
 	GLint modelLoc = glGetUniformLocation(shaderID, "model");
@@ -208,28 +232,24 @@ int main()
 		//glLineWidth(10);
 		//glPointSize(20);
 
-		float angle = (GLfloat)glfwGetTime();
-
 		model = glm::mat4(1);
 
 		scaleModel = glm::vec3(scale, scale, scale);
 		model = glm::scale(model, scaleModel);
 
-		if (rotateX)
-		{
-			model = glm::rotate(model, angle, glm::vec3(1.0f, 0.0f, 0.0f));
+		glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+		glUniformMatrix4fv(glGetUniformLocation(shaderID, "view"), 1, GL_FALSE, glm::value_ptr(view));
 
-		}
-		else if (rotateY)
-		{
-			model = glm::rotate(model, angle, glm::vec3(0.0f, 1.0f, 0.0f));
+		// Ao invés de atualizar a posição da câmera no callback de keyboard event, estou atualizando ela
+		// aqui para criar a sensação de um movimento de câmera mais suave. No callback, apenas atualizo a(s)
+		// tecla(s) que está/estão sendo apertada(s), e com base nisso faço os cálculos aqui, na atualização do frame
+		// (atualiza muito mais rápido do que a chamada do callback do glfw)
+		if (moveW) cameraPos += cameraFront * cameraSpeed;
+		if (moveA) cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+		if (moveS) cameraPos -= cameraFront * cameraSpeed;
+		if (moveD) cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
 
-		}
-		else if (rotateZ)
-		{
-			model = glm::rotate(model, angle, glm::vec3(0.0f, 0.0f, 1.0f));
-
-		}
+		glUniform3f(glGetUniformLocation(shaderID, "cameraPos"), cameraPos.x, cameraPos.y, cameraPos.z);
 
 		// O cálculo da posição leva em conta o valor digitado pelo teclado (translateX, Y e Z) + os valores de cada cubo do array
 		// de cubos
@@ -418,64 +438,43 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
 		glfwSetWindowShouldClose(window, GL_TRUE);
 
-	if (key == GLFW_KEY_X && action == GLFW_PRESS)
+	if (key == GLFW_KEY_W && action == GLFW_PRESS) moveW = true;
+	if (key == GLFW_KEY_W && action == GLFW_RELEASE) moveW = false;
+	if (key == GLFW_KEY_A && action == GLFW_PRESS) moveA = true;
+	if (key == GLFW_KEY_A && action == GLFW_RELEASE) moveA = false;
+	if (key == GLFW_KEY_S && action == GLFW_PRESS) moveS = true;
+	if (key == GLFW_KEY_S && action == GLFW_RELEASE) moveS = false;
+	if (key == GLFW_KEY_D && action == GLFW_PRESS) moveD = true;
+	if (key == GLFW_KEY_D && action == GLFW_RELEASE) moveD = false;
+
+}
+
+void mouse_callback(GLFWwindow* window, double xpos, double ypos)
+{
+	if (firstMouse)
 	{
-		rotateX = true;
-		rotateY = false;
-		rotateZ = false;
-	}
-	if (key == GLFW_KEY_Y && action == GLFW_PRESS)
-	{
-		rotateX = false;
-		rotateY = true;
-		rotateZ = false;
-	}
-	if (key == GLFW_KEY_Z && action == GLFW_PRESS)
-	{
-		rotateX = false;
-		rotateY = false;
-		rotateZ = true;
+		lastX = xpos;
+		lastY = ypos;
+		firstMouse = false;
 	}
 
-	// Por mais que as teclas para aumentar e diminuir sejam [ e ] no código,
-	// na prática, se usa [ para aumentar e ´ para diminuir. Creio que isso ocorre em função
-	// das diferenças no teclado americano e o ABNT
-	if (key == GLFW_KEY_LEFT_BRACKET && action == GLFW_PRESS) {
-		if (scale > 0.01f) scale -= 0.01f;
-	}
+	float offsetx = xpos - lastX;
+	float offsety = lastY - ypos;
 
-	if (key == GLFW_KEY_RIGHT_BRACKET && action == GLFW_PRESS) {
-		if (scale < 2.0f) scale += 0.01f;
-	}
+	lastX = xpos;
+	lastY = ypos;
 
-	if (key == GLFW_KEY_A && action == GLFW_PRESS) {
-		translateX -= 0.1f;
-	}
-	if (key == GLFW_KEY_D && action == GLFW_PRESS) {
-		translateX += 0.1f;
-	}
+	offsetx *= sensitivity;
+	offsety *= sensitivity;
 
-	if (key == GLFW_KEY_S && action == GLFW_PRESS) {
-		translateZ -= 0.1f;
-	}
-	if (key == GLFW_KEY_W && action == GLFW_PRESS) {
-		translateZ += 0.1f;
-	}
+	pitch += offsety;
+	yaw += offsetx;
 
-	if (key == GLFW_KEY_J && action == GLFW_PRESS) {
-		translateY -= 0.1f;
-	}
-	if (key == GLFW_KEY_I && action == GLFW_PRESS) {
-		translateY += 0.1f;
-	}
-
-	// Reset da posição do cubo
-	if (key == GLFW_KEY_R && action == GLFW_PRESS) {
-		translateX = 0.0f;
-		translateY = 0.0f;
-		translateZ = 0.0f;
-	}
-
+	glm::vec3 front;
+	front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+	front.y = sin(glm::radians(pitch));
+	front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+	cameraFront = glm::normalize(front);
 }
 
 //Esta função está basntante hardcoded - objetivo é compilar e "buildar" um programa de

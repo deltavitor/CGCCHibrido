@@ -16,6 +16,8 @@
 #include <sstream>
 #include <vector>
 
+#include "Shader.h"
+
 using namespace std;
 
 // GLAD
@@ -59,87 +61,13 @@ GLuint setupTexture(string path);
 vector<Vertex> setupObj(string path);
 Material setupMtl(string path);
 void setupMtlUniforms(GLuint shaderProgram, Material material);
-int setupShader();
 int setupGeometry(vector<Vertex>& vertices);
 vector<glm::vec3> generateCircleControlPoints(glm::vec3 referencePoint, float radius);
 GLuint generateControlPointsBuffer(vector <glm::vec3> controlPoints);
-int setupCurveShader();
 BezierCurve createBezierCurve(vector <glm::vec3> controlPoints, int pointsPerSegment);
 
 // Dimensões da janela (pode ser alterado em tempo de execução)
 const GLuint WIDTH = 1000, HEIGHT = 1000;
-
-// Código fonte do Vertex Shader (em GLSL): ainda hardcoded
-const GLchar* vertexShaderSource = "#version 450\n"
-"layout (location = 0) in vec3 position;\n"
-"layout (location = 1) in vec2 texCoord;\n"
-"layout (location = 2) in vec3 color;\n"
-"layout (location = 3) in vec3 normal;\n"
-"uniform mat4 model;\n"
-"uniform mat4 view;\n"
-"uniform mat4 projection;\n"
-"out vec3 fragPos;\n"
-"out vec4 finalColor;\n"
-"out vec2 finalTexCoord;\n"
-"out vec3 scaledNormal;\n"
-"void main()\n"
-"{\n"
-"gl_Position = projection * view * model * vec4(position, 1.0);\n"
-"fragPos = vec3(model * vec4(position, 1.0));\n"
-"finalColor = vec4(color, 1.0);\n"
-"finalTexCoord = texCoord;\n"
-"scaledNormal = mat3(transpose(inverse(model))) * normal;\n"
-"}\0";
-
-//Códifo fonte do Fragment Shader (em GLSL): ainda hardcoded
-const GLchar* fragmentShaderSource = "#version 450\n"
-"in vec3 fragPos;\n"
-"in vec2 finalTexCoord;\n"
-"in vec4 finalColor;\n"
-"in vec3 scaledNormal;\n"
-"uniform sampler2D texture1;\n"
-"uniform float kaR, kaG, kaB;\n"
-"uniform float kdR, kdG, kdB;\n"
-"uniform float ksR, ksG, ksB;\n"
-"uniform float ns;\n"
-"uniform vec3 lightPos;\n"
-"uniform vec3 lightColor;\n"
-"uniform vec3 cameraPos;\n"
-"out vec4 color;\n"
-"void main()\n"
-"{\n"
-"vec3 ambient = vec3(kaR, kaG, kaB) * lightColor;\n"
-"vec3 N = normalize(scaledNormal);\n"
-"vec3 L = normalize(lightPos - fragPos);\n"
-"float diff = max(dot(N, L), 0.0);\n"
-"vec3 diffuse = vec3(kdR, kdG, kdB) * diff * lightColor;\n"
-"vec3 V = normalize(cameraPos - fragPos);\n"
-"vec3 R = normalize(reflect(-L, N));\n"
-"float spec = max(dot(R, V), 0.0);\n"
-"spec = pow(spec, ns);\n"
-"vec3 specular = vec3(ksR, ksG, ksB) * spec * lightColor;\n"
-"vec4 finalTexture = texture(texture1, finalTexCoord);\n"
-"vec3 result = (ambient + diffuse) * vec3(finalTexture) + specular;\n"
-"color = vec4(result, 1.0);\n"
-"}\n\0";
-
-// Shaders para as curvas e os pontos
-const GLchar* vertexShaderCurveSource = "#version 450 core\n"
-"layout(location = 0) in vec3 position;\n"
-"uniform mat4 view;\n"
-"uniform mat4 projection;\n"
-"void main()\n"
-"{\n"
-"gl_Position = projection * view * vec4(position, 1.0f);\n"
-"}\n\0";
-
-const GLchar* fragmentShaderCurveSource = "#version 450 core\n"
-"uniform vec4 finalColor;\n"
-"out vec4 color;\n"
-"void main()\n"
-"{\n"
-"color = finalColor;\n"
-"}\n\0";
 
 bool rotateX=false, rotateY=false, rotateZ=false;
 float translateX = 0.0f, translateY = 0.0f, translateZ = 0.0f;
@@ -219,22 +147,22 @@ int main()
 	GLuint textureIDLua = setupTexture(materialLua.textureName);
 
 	// Compilando e buildando o programa de shader
-	GLuint shaderID = setupShader();
-	glUseProgram(shaderID);
+	Shader objectShader = Shader("../shaders/Object.vs", "../shaders/Object.fs");
+	glUseProgram(objectShader.getId());
 
-	glUniform1i(glGetUniformLocation(shaderID, "texture1"), 0);
+	glUniform1i(glGetUniformLocation(objectShader.getId(), "texture1"), 0);
 
-	setupMtlUniforms(shaderID, material);
+	setupMtlUniforms(objectShader.getId(), material);
 
 	// Câmera
 	glm::mat4 view = glm::lookAt(glm::vec3(0.0, 0.0, 3.0), glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
-	glUniformMatrix4fv(glGetUniformLocation(shaderID, "view"), 1, GL_FALSE, glm::value_ptr(view));
+	glUniformMatrix4fv(glGetUniformLocation(objectShader.getId(), "view"), 1, GL_FALSE, glm::value_ptr(view));
 
 	glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)width / (float)height, 0.1f, 100.0f);
-	glUniformMatrix4fv(glGetUniformLocation(shaderID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+	glUniformMatrix4fv(glGetUniformLocation(objectShader.getId(), "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
 	glm::mat4 model = glm::mat4(1); //matriz identidade;
-	GLint modelLoc = glGetUniformLocation(shaderID, "model");
+	GLint modelLoc = glGetUniformLocation(objectShader.getId(), "model");
 
 	// Scale model do planeta
 	glm::vec3 scaleModel = glm::vec3(10.0f, 10.0f, 10.0f);
@@ -261,20 +189,20 @@ int main()
 	planetReferencePoint = glm::vec3(sumX / vertices.size(), sumY / vertices.size(), sumZ / vertices.size());
 
 	// Fonte de luz (Sol no futuro)
-	glUniform3f(glGetUniformLocation(shaderID, "lightPos"), planetReferencePoint.x + 9.0f, planetReferencePoint.y, planetReferencePoint.z + 9.0f);
-	glUniform3f(glGetUniformLocation(shaderID, "lightColor"), 1.0f, 1.0f, 1.0f);
+	glUniform3f(glGetUniformLocation(objectShader.getId(), "lightPos"), planetReferencePoint.x + 9.0f, planetReferencePoint.y, planetReferencePoint.z + 9.0f);
+	glUniform3f(glGetUniformLocation(objectShader.getId(), "lightColor"), 1.0f, 1.0f, 1.0f);
 
 	vector<glm::vec3> controlPoints = generateCircleControlPoints(planetReferencePoint, 3.0f);
 	GLuint pointsVAO = generateControlPointsBuffer(controlPoints);
 
 	BezierCurve moonOrbitCurve = createBezierCurve(controlPoints, 10000);
-	GLuint curveShader = setupCurveShader();
+	Shader lineShader = Shader("../shaders/Line.vs", "../shaders/Line.fs");
 
-	glUseProgram(curveShader);
+	glUseProgram(lineShader.getId());
 
-	glUniformMatrix4fv(glGetUniformLocation(curveShader, "view"), 1, GL_FALSE, glm::value_ptr(view));
+	glUniformMatrix4fv(glGetUniformLocation(lineShader.getId(), "view"), 1, GL_FALSE, glm::value_ptr(view));
 
-	glUniformMatrix4fv(glGetUniformLocation(curveShader, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+	glUniformMatrix4fv(glGetUniformLocation(lineShader.getId(), "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
 	glEnable(GL_DEPTH_TEST);
 
@@ -295,10 +223,10 @@ int main()
 		//glLineWidth(10);
 		glPointSize(10);
 
-		glUseProgram(shaderID);
+		glUseProgram(objectShader.getId());
 
 		glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
-		glUniformMatrix4fv(glGetUniformLocation(shaderID, "view"), 1, GL_FALSE, glm::value_ptr(view));
+		glUniformMatrix4fv(glGetUniformLocation(objectShader.getId(), "view"), 1, GL_FALSE, glm::value_ptr(view));
 
 		// Ao invés de atualizar a posição da câmera no callback de keyboard event, estou atualizando ela
 		// aqui para criar a sensação de um movimento de câmera mais suave. No callback, apenas atualizo a(s)
@@ -309,7 +237,7 @@ int main()
 		if (moveS) cameraPos -= cameraFront * cameraSpeed;
 		if (moveD) cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
 
-		glUniform3f(glGetUniformLocation(shaderID, "cameraPos"), cameraPos.x, cameraPos.y, cameraPos.z);
+		glUniform3f(glGetUniformLocation(objectShader.getId(), "cameraPos"), cameraPos.x, cameraPos.y, cameraPos.z);
 
 		// O cálculo da posição leva em conta o valor digitado pelo teclado (translateX, Y e Z) + os valores de cada cubo do array
 		// de cubos
@@ -354,24 +282,24 @@ int main()
 
 		// Curvas
 
-		glUseProgram(curveShader);
+		glUseProgram(lineShader.getId());
 
-		glUniformMatrix4fv(glGetUniformLocation(curveShader, "view"), 1, GL_FALSE, glm::value_ptr(view));
+		glUniformMatrix4fv(glGetUniformLocation(lineShader.getId(), "view"), 1, GL_FALSE, glm::value_ptr(view));
 
 		// Curva vermelha do circulo
-		glUniform4f(glGetUniformLocation(curveShader, "finalColor"), 1.0f, 0.0f, 0.0f, 1.0f);
+		glUniform4f(glGetUniformLocation(lineShader.getId(), "finalColor"), 1.0f, 0.0f, 0.0f, 1.0f);
 		glBindVertexArray(moonOrbitCurve.VAO);
 		glDrawArrays(GL_LINE_STRIP, 0, moonOrbitCurve.curvePoints.size());
 		glBindVertexArray(0);
 
 		// Pontos amarelos que indicam os pontos de controle
-		glUniform4f(glGetUniformLocation(curveShader, "finalColor"), 1.0f, 1.0f, 0.0f, 1.0f);
+		glUniform4f(glGetUniformLocation(lineShader.getId(), "finalColor"), 1.0f, 1.0f, 0.0f, 1.0f);
 		glBindVertexArray(pointsVAO);
 		glDrawArrays(GL_POINTS, 0, controlPoints.size());
 		glBindVertexArray(0);
 
 		// Linhas verdes que conectam os pontos de controle
-		glUniform4f(glGetUniformLocation(curveShader, "finalColor"), 0.0f, 1.0f, 0.0f, 1.0f);
+		glUniform4f(glGetUniformLocation(lineShader.getId(), "finalColor"), 0.0f, 1.0f, 0.0f, 1.0f);
 		glBindVertexArray(pointsVAO);
 		glDrawArrays(GL_LINE_STRIP, 0, controlPoints.size());
 		glBindVertexArray(0);
@@ -595,54 +523,6 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 	cameraFront = glm::normalize(front);
 }
 
-//Esta função está basntante hardcoded - objetivo é compilar e "buildar" um programa de
-// shader simples e único neste exemplo de código
-// O código fonte do vertex e fragment shader está nos arrays vertexShaderSource e
-// fragmentShader source no iniçio deste arquivo
-// A função retorna o identificador do programa de shader
-int setupShader()
-{
-	// Vertex shader
-	GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
-	glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
-	glCompileShader(vertexShader);
-	// Checando erros de compilação (exibição via log no terminal)
-	GLint success;
-	GLchar infoLog[512];
-	glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
-	if (!success)
-	{
-		glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
-		std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog << std::endl;
-	}
-	// Fragment shader
-	GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-	glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
-	glCompileShader(fragmentShader);
-	// Checando erros de compilação (exibição via log no terminal)
-	glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
-	if (!success)
-	{
-		glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
-		std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog << std::endl;
-	}
-	// Linkando os shaders e criando o identificador do programa de shader
-	GLuint shaderProgram = glCreateProgram();
-	glAttachShader(shaderProgram, vertexShader);
-	glAttachShader(shaderProgram, fragmentShader);
-	glLinkProgram(shaderProgram);
-	// Checando por erros de linkagem
-	glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
-	if (!success) {
-		glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
-		std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED\n" << infoLog << std::endl;
-	}
-	glDeleteShader(vertexShader);
-	glDeleteShader(fragmentShader);
-
-	return shaderProgram;
-}
-
 // Esta função está bastante harcoded - objetivo é criar os buffers que armazenam a 
 // geometria de um triângulo
 // Apenas atributo coordenada nos vértices
@@ -773,48 +653,6 @@ GLuint generateControlPointsBuffer(vector <glm::vec3> controlPoints) {
 	glBindVertexArray(0);
 
 	return VAO;
-}
-
-int setupCurveShader() {
-	// Vertex shader
-	GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
-	glShaderSource(vertexShader, 1, &vertexShaderCurveSource, NULL);
-	glCompileShader(vertexShader);
-	// Checando erros de compilação (exibição via log no terminal)
-	GLint success;
-	GLchar infoLog[512];
-	glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
-	if (!success)
-	{
-		glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
-		std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog << std::endl;
-	}
-	// Fragment shader
-	GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-	glShaderSource(fragmentShader, 1, &fragmentShaderCurveSource, NULL);
-	glCompileShader(fragmentShader);
-	// Checando erros de compilação (exibição via log no terminal)
-	glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
-	if (!success)
-	{
-		glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
-		std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog << std::endl;
-	}
-	// Linkando os shaders e criando o identificador do programa de shader
-	GLuint shaderProgram = glCreateProgram();
-	glAttachShader(shaderProgram, vertexShader);
-	glAttachShader(shaderProgram, fragmentShader);
-	glLinkProgram(shaderProgram);
-	// Checando por erros de linkagem
-	glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
-	if (!success) {
-		glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
-		std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED\n" << infoLog << std::endl;
-	}
-	glDeleteShader(vertexShader);
-	glDeleteShader(fragmentShader);
-
-	return shaderProgram;
 }
 
 BezierCurve createBezierCurve(std::vector <glm::vec3> controlPoints, int pointsPerSegment) {

@@ -13,6 +13,9 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="shaders">
+      <UniqueIdentifier>{2aed0568-99d0-49be-b5cd-fa2a9f57fa84}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Origem.cpp">
@@ -21,5 +24,27 @@
     <ClCompile Include="..\glad.c">
       <Filter>Arquivos de Origem</Filter>
     </ClCompile>
+    <ClCompile Include="Shader.cpp">
+      <Filter>Arquivos de Origem</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Shader.h">
+      <Filter>Arquivos de Cabeçalho</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\shaders\Object.fs">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\shaders\Object.vs">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\shaders\Line.fs">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\shaders\Line.vs">
+      <Filter>shaders</Filter>
+    </None>
   </ItemGroup>
 </Project>

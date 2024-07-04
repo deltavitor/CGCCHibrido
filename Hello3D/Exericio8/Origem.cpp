@@ -16,6 +16,19 @@
 #include <sstream>
 #include <vector>
 
+using namespace std;
+
+// GLAD
+#include <glad/glad.h>
+
+// GLFW
+#include <GLFW/glfw3.h>
+
+//GLM
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
 // Um struct auxiliar para facilitar a criação dos floats com os atributos dos vertices
 struct Vertex {
 	float x, y, z;		// Positioning
@@ -32,19 +45,11 @@ struct Material {
 	std::string textureName; // map_Kd
 };
 
-using namespace std;
-
-// GLAD
-#include <glad/glad.h>
-
-// GLFW
-#include <GLFW/glfw3.h>
-
-//GLM
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
-
+// Struct auxiliar para agrupar os dados da curva de Bezier
+struct BezierCurve {
+	GLuint VAO;
+	std::vector<glm::vec3> curvePoints;
+};
 
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
@@ -56,6 +61,10 @@ Material setupMtl(string path);
 void setupMtlUniforms(GLuint shaderProgram, Material material);
 int setupShader();
 int setupGeometry(vector<Vertex>& vertices);
+vector<glm::vec3> generateCircleControlPoints(glm::vec3 referencePoint, float radius);
+GLuint generateControlPointsBuffer(vector <glm::vec3> controlPoints);
+int setupCurveShader();
+BezierCurve createBezierCurve(vector <glm::vec3> controlPoints, int pointsPerSegment);
 
 // Dimensões da janela (pode ser alterado em tempo de execução)
 const GLuint WIDTH = 1000, HEIGHT = 1000;
@@ -79,7 +88,7 @@ const GLchar* vertexShaderSource = "#version 450\n"
 "fragPos = vec3(model * vec4(position, 1.0));\n"
 "finalColor = vec4(color, 1.0);\n"
 "finalTexCoord = texCoord;\n"
-"scaledNormal = normal;\n"
+"scaledNormal = mat3(transpose(inverse(model))) * normal;\n"
 "}\0";
 
 //Códifo fonte do Fragment Shader (em GLSL): ainda hardcoded
@@ -110,8 +119,26 @@ const GLchar* fragmentShaderSource = "#version 450\n"
 "spec = pow(spec, ns);\n"
 "vec3 specular = vec3(ksR, ksG, ksB) * spec * lightColor;\n"
 "vec4 finalTexture = texture(texture1, finalTexCoord);\n"
-"vec3 result = (ambient + diffuse) * vec3(finalTexture.r, finalTexture.g, finalTexture.b) + specular;\n"
+"vec3 result = (ambient + diffuse) * vec3(finalTexture) + specular;\n"
 "color = vec4(result, 1.0);\n"
+"}\n\0";
+
+// Shaders para as curvas e os pontos
+const GLchar* vertexShaderCurveSource = "#version 450 core\n"
+"layout(location = 0) in vec3 position;\n"
+"uniform mat4 view;\n"
+"uniform mat4 projection;\n"
+"void main()\n"
+"{\n"
+"gl_Position = projection * view * vec4(position, 1.0f);\n"
+"}\n\0";
+
+const GLchar* fragmentShaderCurveSource = "#version 450 core\n"
+"uniform vec4 finalColor;\n"
+"out vec4 color;\n"
+"void main()\n"
+"{\n"
+"color = finalColor;\n"
 "}\n\0";
 
 bool rotateX=false, rotateY=false, rotateZ=false;
@@ -123,8 +150,8 @@ glm::vec3 cameraFront = glm::vec3(0.0, 0.0, -3.0);
 glm::vec3 cameraUp = glm::vec3(0.0, 1.0, 0.0);
 bool firstMouse = true;
 float lastX, lastY;
-float sensitivity = 0.05;
-float cameraSpeed = 0.02f;
+float sensitivity = 0.1f;
+float cameraSpeed = 0.04f;
 float pitch = 0.0, yaw = -90.0;
 
 bool moveW = false, moveA = false, moveS = false, moveD = false;
@@ -177,22 +204,27 @@ int main()
 	glfwGetFramebufferSize(window, &width, &height);
 	glViewport(0, 0, width, height);
 
-	// Compilando e buildando o programa de shader
-	GLuint shaderID = setupShader();
-
+	// Planeta
 	vector<Vertex> vertices = setupObj("../../3D_Models/Suzanne/bola.obj");
 	GLuint VAO = setupGeometry(vertices);
 
 	Material material = setupMtl("../../3D_Models/Suzanne/bola.mtl");
 	GLuint textureID = setupTexture(material.textureName);
 
+	// Lua
+	vector<Vertex> verticesLua = setupObj("../../3D_Models/Planetas/planeta.obj");
+	GLuint VAOLua = setupGeometry(verticesLua);
+
+	Material materialLua = setupMtl("../../3D_Models/Planetas/planeta.mtl");
+	GLuint textureIDLua = setupTexture(materialLua.textureName);
+
+	// Compilando e buildando o programa de shader
+	GLuint shaderID = setupShader();
 	glUseProgram(shaderID);
+
 	glUniform1i(glGetUniformLocation(shaderID, "texture1"), 0);
 
 	setupMtlUniforms(shaderID, material);
-	// Com esses valores, a SuzanneTriTextured fica com o rosto iluminado
-	glUniform3f(glGetUniformLocation(shaderID, "lightPos"), 2.0f, 5.0f, -10.0f);
-	glUniform3f(glGetUniformLocation(shaderID, "lightColor"), 1.0f, 1.0f, 1.0f);
 
 	// Câmera
 	glm::mat4 view = glm::lookAt(glm::vec3(0.0, 0.0, 3.0), glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
@@ -204,17 +236,51 @@ int main()
 	glm::mat4 model = glm::mat4(1); //matriz identidade;
 	GLint modelLoc = glGetUniformLocation(shaderID, "model");
 
-	// Models do glm para aumentar/diminuir e mover os vértices
+	// Scale model do planeta
 	glm::vec3 scaleModel = glm::vec3(10.0f, 10.0f, 10.0f);
+	// Scale model da Lua
+	glm::vec3 scaleModelLua = glm::vec3(3.0f, 3.0f, 3.0f);
 
 	glm::vec3 translationModel = glm::vec3(1.0f, 1.0f, 1.0f);
 
-	//
 	model = glm::rotate(model, /*(GLfloat)glfwGetTime()*/glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
 	glUniformMatrix4fv(modelLoc, 1, FALSE, glm::value_ptr(model));
 
+	// Curvas
+
+	// Aqui, o planetReferencePoint é o centro do VAO do planeta e vai ser usado para gerar o círculo de órbita da Lua
+	// O centro dele é calculado a partir de todas as coordenadas os vertices (e depois por uma divisao)
+	glm::vec3 planetReferencePoint;
+	float sumX = 0.0f, sumY = 0.0f, sumZ = 0.0f;
+	for (Vertex vertex : vertices) {
+		sumX += vertex.x;
+		sumY += vertex.y;
+		sumZ += vertex.z;
+	}
+	cout << sumX / vertices.size();
+	planetReferencePoint = glm::vec3(sumX / vertices.size(), sumY / vertices.size(), sumZ / vertices.size());
+
+	// Fonte de luz (Sol no futuro)
+	glUniform3f(glGetUniformLocation(shaderID, "lightPos"), planetReferencePoint.x + 9.0f, planetReferencePoint.y, planetReferencePoint.z + 9.0f);
+	glUniform3f(glGetUniformLocation(shaderID, "lightColor"), 1.0f, 1.0f, 1.0f);
+
+	vector<glm::vec3> controlPoints = generateCircleControlPoints(planetReferencePoint, 3.0f);
+	GLuint pointsVAO = generateControlPointsBuffer(controlPoints);
+
+	BezierCurve moonOrbitCurve = createBezierCurve(controlPoints, 10000);
+	GLuint curveShader = setupCurveShader();
+
+	glUseProgram(curveShader);
+
+	glUniformMatrix4fv(glGetUniformLocation(curveShader, "view"), 1, GL_FALSE, glm::value_ptr(view));
+
+	glUniformMatrix4fv(glGetUniformLocation(curveShader, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+
 	glEnable(GL_DEPTH_TEST);
 
+	int nbCurvePoints = moonOrbitCurve.curvePoints.size();
+	int i = 0;
+	float angle = 0.0f;
 
 	// Loop da aplicação - "game loop"
 	while (!glfwWindowShouldClose(window))
@@ -223,19 +289,13 @@ int main()
 		glfwPollEvents();
 
 		// Limpa o buffer de cor
-		glClearColor(1.0f, 1.0f, 1.0f, 1.0f); //cor de fundo
+		glClearColor(0.0f, 0.0f, 0.0f, 1.0f); //cor de fundo
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, textureID);
-
 		//glLineWidth(10);
-		//glPointSize(20);
+		glPointSize(10);
 
-		model = glm::mat4(1);
-
-		scaleModel = glm::vec3(scale, scale, scale);
-		model = glm::scale(model, scaleModel);
+		glUseProgram(shaderID);
 
 		glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
 		glUniformMatrix4fv(glGetUniformLocation(shaderID, "view"), 1, GL_FALSE, glm::value_ptr(view));
@@ -256,20 +316,78 @@ int main()
 		//translationModel = glm::vec3(translateX + cubes[i + 0], translateY + cubes[i + 1], translateZ + cubes[i + 2]);
 		//model = glm::translate(model, translationModel);
 
-		glUniformMatrix4fv(modelLoc, 1, FALSE, glm::value_ptr(model));
+		// glUniformMatrix4fv(modelLoc, 1, FALSE, glm::value_ptr(model));
 		// Chamada de desenho - drawcall
 		// Poligono Preenchido - GL_TRIANGLES
 
-		glBindVertexArray(VAO);
-		glDrawArrays(GL_TRIANGLES, 0, vertices.size() * 2);
+		// Planeta
 
+		model = glm::mat4(1);
+		scaleModel = glm::vec3(scale, scale, scale);
+		// O planeta é rotacionado a cada frame no eixo Y
+		model = glm::rotate(model, glm::radians(0.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+		model = glm::rotate(model, glm::radians(angle), glm::vec3(0.0f, 1.0f, 0.0f));
+		model = glm::rotate(model, glm::radians(0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		model = glm::scale(model, scaleModel);
+		glUniformMatrix4fv(modelLoc, 1, FALSE, glm::value_ptr(model));
+
+		glBindVertexArray(VAO);
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, textureID);
+		glDrawArrays(GL_TRIANGLES, 0, vertices.size());
 		glBindVertexArray(0);
+
+		// Lua
+
+		model = glm::mat4(1);
+		scaleModel = glm::vec3(scale / 3.0f, scale / 3.0f , scale / 3.0f);
+		// A Lua é inicialmente posicionada no 0,0, então para posiciona-la no ponto atual da curva, uso o translate
+		model = glm::translate(model, moonOrbitCurve.curvePoints[i]);
+		model = glm::scale(model, scaleModel);
+		glUniformMatrix4fv(modelLoc, 1, FALSE, glm::value_ptr(model));
+
+		glBindVertexArray(VAOLua);
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, textureIDLua);
+		glDrawArrays(GL_TRIANGLES, 0, verticesLua.size());
+		glBindVertexArray(0);
+
+		// Curvas
+
+		glUseProgram(curveShader);
+
+		glUniformMatrix4fv(glGetUniformLocation(curveShader, "view"), 1, GL_FALSE, glm::value_ptr(view));
+
+		// Curva vermelha do circulo
+		glUniform4f(glGetUniformLocation(curveShader, "finalColor"), 1.0f, 0.0f, 0.0f, 1.0f);
+		glBindVertexArray(moonOrbitCurve.VAO);
+		glDrawArrays(GL_LINE_STRIP, 0, moonOrbitCurve.curvePoints.size());
+		glBindVertexArray(0);
+
+		// Pontos amarelos que indicam os pontos de controle
+		glUniform4f(glGetUniformLocation(curveShader, "finalColor"), 1.0f, 1.0f, 0.0f, 1.0f);
+		glBindVertexArray(pointsVAO);
+		glDrawArrays(GL_POINTS, 0, controlPoints.size());
+		glBindVertexArray(0);
+
+		// Linhas verdes que conectam os pontos de controle
+		glUniform4f(glGetUniformLocation(curveShader, "finalColor"), 0.0f, 1.0f, 0.0f, 1.0f);
+		glBindVertexArray(pointsVAO);
+		glDrawArrays(GL_LINE_STRIP, 0, controlPoints.size());
+		glBindVertexArray(0);
+
+		i = (i + 20) % nbCurvePoints;
+		// Valor de angle é usado para rotacionar os objetos
+		if (angle < 360.0f) angle += 0.1f;
+		else angle = 0.0f;
 
 		// Troca os buffers da tela
 		glfwSwapBuffers(window);
 	}
 	// Pede pra OpenGL desalocar os buffers
 	glDeleteVertexArrays(1, &VAO);
+	glDeleteVertexArrays(1, &moonOrbitCurve.VAO);
+	glDeleteVertexArrays(1, &pointsVAO);
 	// Finaliza a execução da GLFW, limpando os recursos alocados por ela
 	glfwTerminate();
 	return 0;
@@ -562,3 +680,213 @@ int setupGeometry(vector<Vertex>& vertices) {
 	return VAO;
 }
 
+/**
+	Gera pontos de controle que quando combinados, gerarão um círculo ao redor do ponto de referência
+	("referencePoint") com raio "radius". O ponto de referencia é um valor no espaço 3d (x, y, z)
+*/
+vector<glm::vec3> generateCircleControlPoints(glm::vec3 referencePoint, float radius) {
+	vector <glm::vec3> controlPoints;
+
+	float refX = referencePoint.x;
+	float refY = referencePoint.y;
+	float refZ = referencePoint.z;
+
+	// Como estou usando curvas de Bezier para fazer o círculo, alguns cálculos precisam ser feitos
+	// Basicamente, 4 pontos são criados a partir do ponto de referência para formar um quadrado. A distância
+	// do ponto de ref é o radius. Esse quadrado será usado para criar o círculo.
+	// Depois que tenho os 4 pontos de controle, crio 2 pontos novos para cada 
+	// (um posicionado "antes" e outro "depois" do ponto de controle). Esses pontos são usados como pontos
+	// auxiliares para direcionar a curva. Assim, para criar o círculo, o primeiro e o último ponto são os pontos de controle
+	// P0, P1, P2 e P3 e os pontos do meio que direcionam a curva. Assim, nessa ordem, são criados 4 curvas que formam os 4 "quadrantes"
+	// ou segmentos do círculo que quero gerar. 
+
+	// Esse valor é um valor específico que, quando multiplicado pelo raio que estou usando, dará as curvas que mais se parecerão
+	// com os 4 segmentos de um círculo. Fonte: https://stackoverflow.com/questions/1734745/how-to-create-circle-with-b%C3%A9zier-curves
+	float auxControlPoint = 0.552284749831f * radius;
+
+	glm::vec3 P0 = glm::vec3(refX + radius, refY, refZ + radius);   // Top (vértice do quadrado)
+	glm::vec3 P0Aux0 = glm::vec3(P0.x - auxControlPoint, P0.y, P0.z + auxControlPoint);
+	glm::vec3 P0Aux1 = glm::vec3(P0.x + auxControlPoint, P0.y, P0.z - auxControlPoint);
+
+	glm::vec3 P1 = glm::vec3(refX + radius, refY, refZ - radius);    // Left
+	glm::vec3 P1Aux0 = glm::vec3(P1.x + auxControlPoint, P1.y, P1.z + auxControlPoint);
+	glm::vec3 P1Aux1 = glm::vec3(P1.x - auxControlPoint, P1.y, P1.z - auxControlPoint);
+
+	glm::vec3 P2 = glm::vec3(refX - radius, refY, refZ - radius);   // Bottom
+	glm::vec3 P2Aux0 = glm::vec3(P2.x + auxControlPoint, P2.y, P2.z - auxControlPoint);
+	glm::vec3 P2Aux1 = glm::vec3(P2.x - auxControlPoint, P2.y, P2.z + auxControlPoint);
+
+	glm::vec3 P3 = glm::vec3(refX - radius, refY, refZ + radius);   // Right
+	glm::vec3 P3Aux0 = glm::vec3(P3.x - auxControlPoint, P3.y, P3.z - auxControlPoint);
+	glm::vec3 P3Aux1 = glm::vec3(P3.x + auxControlPoint, P3.y, P3.z + auxControlPoint);
+
+	// Primeira curva do círculo (P0 a P1)...
+	controlPoints.push_back(P0);
+	controlPoints.push_back(P0Aux1);
+	controlPoints.push_back(P1Aux0);
+	controlPoints.push_back(P1);
+
+	controlPoints.push_back(P1Aux1);
+	controlPoints.push_back(P2Aux0);
+	controlPoints.push_back(P2);
+
+	controlPoints.push_back(P2Aux1);
+	controlPoints.push_back(P3Aux0);
+	controlPoints.push_back(P3);
+
+	controlPoints.push_back(P3Aux1);
+	controlPoints.push_back(P0Aux0);
+	controlPoints.push_back(P0);
+
+	return controlPoints;
+}
+
+GLuint generateControlPointsBuffer(vector <glm::vec3> controlPoints) {
+
+	GLuint VBO, VAO;
+
+	//Geração do identificador do VBO
+	glGenBuffers(1, &VBO);
+
+	//Faz a conexão (vincula) do buffer como um buffer de array
+	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+
+	//Envia os dados do array de floats para o buffer da OpenGl
+	glBufferData(GL_ARRAY_BUFFER, controlPoints.size() * sizeof(GLfloat) * 3, controlPoints.data(), GL_STATIC_DRAW);
+
+	//Geração do identificador do VAO (Vertex Array Object)
+	glGenVertexArrays(1, &VAO);
+
+	// Vincula (bind) o VAO primeiro, e em seguida  conecta e seta o(s) buffer(s) de vértices
+	// e os ponteiros para os atributos 
+	glBindVertexArray(VAO);
+
+	//Atributo posição (x, y, z)
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
+	glEnableVertexAttribArray(0);
+
+	// Observe que isso é permitido, a chamada para glVertexAttribPointer registrou o VBO como o objeto de buffer de vértice 
+	// atualmente vinculado - para que depois possamos desvincular com segurança
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+	// Desvincula o VAO (é uma boa prática desvincular qualquer buffer ou array para evitar bugs medonhos)
+	glBindVertexArray(0);
+
+	return VAO;
+}
+
+int setupCurveShader() {
+	// Vertex shader
+	GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
+	glShaderSource(vertexShader, 1, &vertexShaderCurveSource, NULL);
+	glCompileShader(vertexShader);
+	// Checando erros de compilação (exibição via log no terminal)
+	GLint success;
+	GLchar infoLog[512];
+	glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
+	if (!success)
+	{
+		glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
+		std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog << std::endl;
+	}
+	// Fragment shader
+	GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+	glShaderSource(fragmentShader, 1, &fragmentShaderCurveSource, NULL);
+	glCompileShader(fragmentShader);
+	// Checando erros de compilação (exibição via log no terminal)
+	glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
+	if (!success)
+	{
+		glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
+		std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog << std::endl;
+	}
+	// Linkando os shaders e criando o identificador do programa de shader
+	GLuint shaderProgram = glCreateProgram();
+	glAttachShader(shaderProgram, vertexShader);
+	glAttachShader(shaderProgram, fragmentShader);
+	glLinkProgram(shaderProgram);
+	// Checando por erros de linkagem
+	glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
+	if (!success) {
+		glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
+		std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED\n" << infoLog << std::endl;
+	}
+	glDeleteShader(vertexShader);
+	glDeleteShader(fragmentShader);
+
+	return shaderProgram;
+}
+
+BezierCurve createBezierCurve(std::vector <glm::vec3> controlPoints, int pointsPerSegment) {
+
+	glm::mat4 M = glm::mat4(
+		-1, 3, -3, 1,
+		3, -6, 3, 0,
+		-3, 3, 0, 0,
+		1, 0, 0, 0
+	);
+
+	BezierCurve bezierCurve;
+	GLuint VAO;
+	vector<glm::vec3> curvePoints;
+	float step = 1.0 / (float)pointsPerSegment;
+	float t = 0;
+	int nControlPoints = controlPoints.size();
+
+	for (int i = 0; i < nControlPoints - 3; i += 3)
+	{
+		for (float t = 0.0; t <= 1.0; t += step)
+		{
+			glm::vec3 p;
+
+			glm::vec4 T(t * t * t, t * t, t, 1);
+
+			glm::vec3 P0 = controlPoints[i];
+			glm::vec3 P1 = controlPoints[i + 1];
+			glm::vec3 P2 = controlPoints[i + 2];
+			glm::vec3 P3 = controlPoints[i + 3];
+
+			glm::mat4x3 G(P0, P1, P2, P3);
+
+			p = G * M * T;  //---------
+
+			curvePoints.push_back(p);
+		}
+	}
+
+
+	//Gera o VAO
+	GLuint VBO;
+
+	//Geração do identificador do VBO
+	glGenBuffers(1, &VBO);
+
+	//Faz a conexão (vincula) do buffer como um buffer de array
+	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+
+	//Envia os dados do array de floats para o buffer da OpenGl
+	glBufferData(GL_ARRAY_BUFFER, curvePoints.size() * sizeof(GLfloat) * 3, curvePoints.data(), GL_STATIC_DRAW);
+
+	//Geração do identificador do VAO (Vertex Array Object)
+	glGenVertexArrays(1, &VAO);
+
+	// Vincula (bind) o VAO primeiro, e em seguida  conecta e seta o(s) buffer(s) de vértices
+	// e os ponteiros para os atributos 
+	glBindVertexArray(VAO);
+
+	//Atributo posição (x, y, z)
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
+	glEnableVertexAttribArray(0);
+
+	// Observe que isso é permitido, a chamada para glVertexAttribPointer registrou o VBO como o objeto de buffer de vértice 
+	// atualmente vinculado - para que depois possamos desvincular com segurança
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+	// Desvincula o VAO (é uma boa prática desvincular qualquer buffer ou array para evitar bugs medonhos)
+	glBindVertexArray(0);
+
+	bezierCurve.VAO = VAO;
+	bezierCurve.curvePoints = curvePoints;
+
+	return bezierCurve;
+}

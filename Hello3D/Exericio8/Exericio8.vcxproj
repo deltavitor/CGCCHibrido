@@ -145,17 +145,31 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\glad.c" />
+    <ClCompile Include="Mesh.cpp" />
     <ClCompile Include="Origem.cpp" />
     <ClCompile Include="Shader.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Material.h" />
+    <ClInclude Include="Mesh.h" />
     <ClInclude Include="Shader.h" />
+    <ClInclude Include="Vertex.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\shaders\Line.fs" />
     <None Include="..\shaders\Line.vs" />
     <None Include="..\shaders\Object.fs" />
     <None Include="..\shaders\Object.vs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="Backup camera global config.txt" />
+    <Text Include="Backup com map e configuracao de curvas.txt" />
+    <Text Include="Backup good 2.txt" />
+    <Text Include="Backup leitura de curvas da scene.txt" />
+    <Text Include="Backup.txt" />
+    <Text Include="broken.txt" />
+    <Text Include="Organizing backup.txt" />
+    <Text Include="Pretty much done.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

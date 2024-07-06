@@ -78,3 +78,7 @@ Shader::Shader(const std::string vertexShaderPath, const std::string fragmentSha
 	glDeleteShader(vertexShader);
 	glDeleteShader(fragmentShader);
 }
+
+void Shader::setTextureUniform() {
+	glUniform1i(glGetUniformLocation(this->id, "tex"), 0);
+}

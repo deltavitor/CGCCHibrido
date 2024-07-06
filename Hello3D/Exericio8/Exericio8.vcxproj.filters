@@ -27,9 +27,21 @@
     <ClCompile Include="Shader.cpp">
       <Filter>Arquivos de Origem</Filter>
     </ClCompile>
+    <ClCompile Include="Mesh.cpp">
+      <Filter>Arquivos de Origem</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Shader.h">
+      <Filter>Arquivos de Cabeçalho</Filter>
+    </ClInclude>
+    <ClInclude Include="Mesh.h">
+      <Filter>Arquivos de Cabeçalho</Filter>
+    </ClInclude>
+    <ClInclude Include="Vertex.h">
+      <Filter>Arquivos de Cabeçalho</Filter>
+    </ClInclude>
+    <ClInclude Include="Material.h">
       <Filter>Arquivos de Cabeçalho</Filter>
     </ClInclude>
   </ItemGroup>
@@ -46,5 +58,31 @@
     <None Include="..\shaders\Line.vs">
       <Filter>shaders</Filter>
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="Backup.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
+    <Text Include="Backup good 2.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
+    <Text Include="Backup leitura de curvas da scene.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
+    <Text Include="Backup com map e configuracao de curvas.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
+    <Text Include="Backup camera global config.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
+    <Text Include="Pretty much done.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
+    <Text Include="Organizing backup.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
+    <Text Include="broken.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
   </ItemGroup>
 </Project>

@@ -9,7 +9,9 @@ private:
 	GLuint id;
 
 public:
-	Shader(const std::string vertexShaderPath, const std::string fragmentShaderPath);
+	Shader(std::string vertexShaderPath, std::string fragmentShaderPath);
 
-	GLuint getId() const { return id; }
+	void setTextureUniform();
+
+	GLuint getId() { return id; }
 };

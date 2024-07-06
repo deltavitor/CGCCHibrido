@@ -1,11 +1,3 @@
-/* Hello Triangle - código adaptado de https://learnopengl.com/#!Getting-started/Hello-Triangle
- *
- * Adaptado por Rossana Baptista Queiroz
- * para a disciplina de Processamento Gráfico - Jogos Digitais - Unisinos
- * Versão inicial: 7/4/2017
- * Última atualização em 12/05/2023
- *
- */
 #define STB_IMAGE_IMPLEMENTATION
 #include "../../Common/include/stb_image.h"
 
@@ -15,10 +7,9 @@
 #include <fstream>
 #include <sstream>
 #include <vector>
+#include <unordered_map>
 
 #include "Shader.h"
-
-using namespace std;
 
 // GLAD
 #include <glad/glad.h>
@@ -31,7 +22,6 @@ using namespace std;
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-// Um struct auxiliar para facilitar a criação dos floats com os atributos dos vertices
 struct Vertex {
 	float x, y, z;		// Positioning
 	float s, t;			// Texture
@@ -43,46 +33,75 @@ struct Material {
 	float kaR, kaG, kaB;   // Ka
 	float kdR, kdG, kdB;   // Kd
 	float ksR, ksG, ksB;   // Ks
-	float ns;     
+	float ns;
 	std::string textureName; // map_Kd
 };
 
-// Struct auxiliar para agrupar os dados da curva de Bezier
-struct BezierCurve {
+struct GlobalConfig {
+	glm::vec3 lightPos, lightColor;
+	glm::vec3 cameraPos, cameraFront;
+	GLfloat fov, nearPlane, farPlane, sensitivity, cameraSpeed;
+};
+
+struct Mesh {
+	std::string name;
+	std::string objFilePath, mtlFilePath;
+	glm::vec3 scale, position, rotation, angle;
+	GLuint incrementalAngle;
+
+	std::vector<Vertex> vertices;
 	GLuint VAO;
+	Material material;
+	GLuint textureID;
+};
+
+struct BezierCurve {
+	std::string name;
+	std::vector<glm::vec3> controlPoints;
+	GLuint pointsPerSegment;
+	glm::vec4 color;
+	glm::vec3 orbit;
+	GLfloat radius;
+
+	GLuint VAO;
+	GLuint controlPointsVAO;
 	std::vector<glm::vec3> curvePoints;
 };
 
+// Protótipos das funções
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
+void readSceneFile(std::string sceneFilePath, std::unordered_map<std::string, Mesh>* meshes, std::vector<std::string>* meshList, std::unordered_map<std::string, BezierCurve>* bezierCurves, GlobalConfig* globalConfig);
+GLuint setupTexture(std::string path);
+std::vector<Vertex> setupObj(std::string path);
+Material setupMtl(std::string path);
+int setupGeometry(std::vector<Vertex>& vertices);
+std::vector<glm::vec3> generateCircleControlPoints(glm::vec3 referencePoint, float radius);
+GLuint generateControlPointsBuffer(std::vector <glm::vec3> controlPoints);
+BezierCurve createBezierCurve(std::vector <glm::vec3> controlPoints, int pointsPerSegment);
 
-// Protótipos das funções
-GLuint setupTexture(string path);
-vector<Vertex> setupObj(string path);
-Material setupMtl(string path);
-void setupMtlUniforms(GLuint shaderProgram, Material material);
-int setupGeometry(vector<Vertex>& vertices);
-vector<glm::vec3> generateCircleControlPoints(glm::vec3 referencePoint, float radius);
-GLuint generateControlPointsBuffer(vector <glm::vec3> controlPoints);
-BezierCurve createBezierCurve(vector <glm::vec3> controlPoints, int pointsPerSegment);
-
-// Dimensões da janela (pode ser alterado em tempo de execução)
+// Globals
+GlobalConfig globalConfig;
 const GLuint WIDTH = 1000, HEIGHT = 1000;
 
-bool rotateX=false, rotateY=false, rotateZ=false;
-float translateX = 0.0f, translateY = 0.0f, translateZ = 0.0f;
-float scale = 0.3f;
-
-glm::vec3 cameraPos = glm::vec3(0.0, 0.0, 3.0);
-glm::vec3 cameraFront = glm::vec3(0.0, 0.0, -3.0);
+// Camera
 glm::vec3 cameraUp = glm::vec3(0.0, 1.0, 0.0);
 bool firstMouse = true;
 float lastX, lastY;
-float sensitivity = 0.1f;
-float cameraSpeed = 0.04f;
 float pitch = 0.0, yaw = -90.0;
-
 bool moveW = false, moveA = false, moveS = false, moveD = false;
+
+// Vertices & rendering
+int i = 0, j = 0;
+float incrementalAngle = 0.0f;
+
+GLuint currentlySelectedMesh = -1;
+GLfloat selectedMeshScale = 1.0f;
+GLfloat selectedMeshAngle = 0.0f;
+glm::vec2 selectedMeshPosition = glm::vec2(0.0f, 0.0f);
+
+// Debugging
+GLuint showCurves = 1;
 
 // Função MAIN
 int main()
@@ -90,21 +109,8 @@ int main()
 	// Inicialização da GLFW
 	glfwInit();
 
-	//Muita atenção aqui: alguns ambientes não aceitam essas configurações
-	//Você deve adaptar para a versão do OpenGL suportada por sua placa
-	//Sugestão: comente essas linhas de código para desobrir a versão e
-	//depois atualize (por exemplo: 4.5 com 4 e 5)
-	//glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-	//glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
-	//glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-
-	//Essencial para computadores da Apple
-//#ifdef __APPLE__
-//	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-//#endif
-
 	// Criação da janela GLFW
-	GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "Modulo 2 -- Vitor Hugo!", nullptr, nullptr);
+	GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "Leitor de Cena", nullptr, nullptr);
 	glfwMakeContextCurrent(window);
 
 	// Fazendo o registro da função de callback para a janela GLFW
@@ -124,91 +130,48 @@ int main()
 	// Obtendo as informações de versão
 	const GLubyte* renderer = glGetString(GL_RENDERER); /* get renderer string */
 	const GLubyte* version = glGetString(GL_VERSION); /* version as a string */
-	cout << "Renderer: " << renderer << endl;
-	cout << "OpenGL version supported " << version << endl;
+	std::cout << "Renderer: " << renderer << std::endl;
+	std::cout << "OpenGL version supported " << version << std::endl;
 
 	// Definindo as dimensões da viewport com as mesmas dimensões da janela da aplicação
 	int width, height;
 	glfwGetFramebufferSize(window, &width, &height);
 	glViewport(0, 0, width, height);
 
-	// Planeta
-	vector<Vertex> vertices = setupObj("../../3D_Models/Suzanne/bola.obj");
-	GLuint VAO = setupGeometry(vertices);
+	// Instanciando os objetos da cena
 
-	Material material = setupMtl("../../3D_Models/Suzanne/bola.mtl");
-	GLuint textureID = setupTexture(material.textureName);
+	std::unordered_map<std::string, Mesh> meshes = std::unordered_map<std::string, Mesh>();
+	std::vector<std::string> meshList = std::vector<std::string>();
+	std::unordered_map<std::string, BezierCurve> bezierCurves = std::unordered_map<std::string, BezierCurve>();
+	readSceneFile("../Scene.txt", &meshes, &meshList, &bezierCurves, &globalConfig);
 
-	// Lua
-	vector<Vertex> verticesLua = setupObj("../../3D_Models/Planetas/planeta.obj");
-	GLuint VAOLua = setupGeometry(verticesLua);
-
-	Material materialLua = setupMtl("../../3D_Models/Planetas/planeta.mtl");
-	GLuint textureIDLua = setupTexture(materialLua.textureName);
-
-	// Compilando e buildando o programa de shader
+	// Shader de mesh
 	Shader objectShader = Shader("../shaders/Object.vs", "../shaders/Object.fs");
 	glUseProgram(objectShader.getId());
 
-	glUniform1i(glGetUniformLocation(objectShader.getId(), "texture1"), 0);
+	// Texture
+	glUniform1i(glGetUniformLocation(objectShader.getId(), "tex"), 0);
 
-	setupMtlUniforms(objectShader.getId(), material);
-
-	// Câmera
-	glm::mat4 view = glm::lookAt(glm::vec3(0.0, 0.0, 3.0), glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 1.0, 0.0));
+	// Camera
+	glm::mat4 view = glm::lookAt(globalConfig.cameraPos, globalConfig.cameraFront, cameraUp);
+	glm::mat4 projection = glm::perspective(glm::radians(globalConfig.fov), (float)width / (float)height, globalConfig.nearPlane, globalConfig.farPlane);
 	glUniformMatrix4fv(glGetUniformLocation(objectShader.getId(), "view"), 1, GL_FALSE, glm::value_ptr(view));
-
-	glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)width / (float)height, 0.1f, 100.0f);
 	glUniformMatrix4fv(glGetUniformLocation(objectShader.getId(), "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
-	glm::mat4 model = glm::mat4(1); //matriz identidade;
-	GLint modelLoc = glGetUniformLocation(objectShader.getId(), "model");
+	// Light
+	glUniform3f(glGetUniformLocation(objectShader.getId(), "lightPos"), globalConfig.lightPos.x, globalConfig.lightPos.y, globalConfig.lightPos.z);
+	glUniform3f(glGetUniformLocation(objectShader.getId(), "lightColor"), globalConfig.lightColor.r, globalConfig.lightColor.g, globalConfig.lightColor.b);
 
-	// Scale model do planeta
-	glm::vec3 scaleModel = glm::vec3(10.0f, 10.0f, 10.0f);
-	// Scale model da Lua
-	glm::vec3 scaleModelLua = glm::vec3(3.0f, 3.0f, 3.0f);
-
-	glm::vec3 translationModel = glm::vec3(1.0f, 1.0f, 1.0f);
-
-	model = glm::rotate(model, /*(GLfloat)glfwGetTime()*/glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-	glUniformMatrix4fv(modelLoc, 1, FALSE, glm::value_ptr(model));
-
-	// Curvas
-
-	// Aqui, o planetReferencePoint é o centro do VAO do planeta e vai ser usado para gerar o círculo de órbita da Lua
-	// O centro dele é calculado a partir de todas as coordenadas os vertices (e depois por uma divisao)
-	glm::vec3 planetReferencePoint;
-	float sumX = 0.0f, sumY = 0.0f, sumZ = 0.0f;
-	for (Vertex vertex : vertices) {
-		sumX += vertex.x;
-		sumY += vertex.y;
-		sumZ += vertex.z;
-	}
-	cout << sumX / vertices.size();
-	planetReferencePoint = glm::vec3(sumX / vertices.size(), sumY / vertices.size(), sumZ / vertices.size());
-
-	// Fonte de luz (Sol no futuro)
-	glUniform3f(glGetUniformLocation(objectShader.getId(), "lightPos"), planetReferencePoint.x + 9.0f, planetReferencePoint.y, planetReferencePoint.z + 9.0f);
-	glUniform3f(glGetUniformLocation(objectShader.getId(), "lightColor"), 1.0f, 1.0f, 1.0f);
-
-	vector<glm::vec3> controlPoints = generateCircleControlPoints(planetReferencePoint, 3.0f);
-	GLuint pointsVAO = generateControlPointsBuffer(controlPoints);
-
-	BezierCurve moonOrbitCurve = createBezierCurve(controlPoints, 10000);
+	// Shader das curvas
 	Shader lineShader = Shader("../shaders/Line.vs", "../shaders/Line.fs");
 
 	glUseProgram(lineShader.getId());
 
+	// Camera
 	glUniformMatrix4fv(glGetUniformLocation(lineShader.getId(), "view"), 1, GL_FALSE, glm::value_ptr(view));
-
 	glUniformMatrix4fv(glGetUniformLocation(lineShader.getId(), "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 
 	glEnable(GL_DEPTH_TEST);
-
-	int nbCurvePoints = moonOrbitCurve.curvePoints.size();
-	int i = 0;
-	float angle = 0.0f;
 
 	// Loop da aplicação - "game loop"
 	while (!glfwWindowShouldClose(window))
@@ -217,126 +180,287 @@ int main()
 		glfwPollEvents();
 
 		// Limpa o buffer de cor
-		glClearColor(0.0f, 0.0f, 0.0f, 1.0f); //cor de fundo
+		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		//glLineWidth(10);
 		glPointSize(10);
+
+		// Shaders & uniforms
 
 		glUseProgram(objectShader.getId());
 
-		glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+		glm::mat4 view = glm::lookAt(globalConfig.cameraPos, globalConfig.cameraPos + globalConfig.cameraFront, cameraUp);
 		glUniformMatrix4fv(glGetUniformLocation(objectShader.getId(), "view"), 1, GL_FALSE, glm::value_ptr(view));
 
-		// Ao invés de atualizar a posição da câmera no callback de keyboard event, estou atualizando ela
-		// aqui para criar a sensação de um movimento de câmera mais suave. No callback, apenas atualizo a(s)
-		// tecla(s) que está/estão sendo apertada(s), e com base nisso faço os cálculos aqui, na atualização do frame
-		// (atualiza muito mais rápido do que a chamada do callback do glfw)
-		if (moveW) cameraPos += cameraFront * cameraSpeed;
-		if (moveA) cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
-		if (moveS) cameraPos -= cameraFront * cameraSpeed;
-		if (moveD) cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+		if (moveW) globalConfig.cameraPos += globalConfig.cameraFront * globalConfig.cameraSpeed;
+		if (moveA) globalConfig.cameraPos -= glm::normalize(glm::cross(globalConfig.cameraFront, cameraUp)) * globalConfig.cameraSpeed;
+		if (moveS) globalConfig.cameraPos -= globalConfig.cameraFront * globalConfig.cameraSpeed;
+		if (moveD) globalConfig.cameraPos += glm::normalize(glm::cross(globalConfig.cameraFront, cameraUp)) * globalConfig.cameraSpeed;
 
-		glUniform3f(glGetUniformLocation(objectShader.getId(), "cameraPos"), cameraPos.x, cameraPos.y, cameraPos.z);
+		glUniform3f(glGetUniformLocation(objectShader.getId(), "cameraPos"), globalConfig.cameraPos.x, globalConfig.cameraPos.y, globalConfig.cameraPos.z);
 
-		// O cálculo da posição leva em conta o valor digitado pelo teclado (translateX, Y e Z) + os valores de cada cubo do array
-		// de cubos
-		//translationModel = glm::vec3(translateX + cubes[i + 0], translateY + cubes[i + 1], translateZ + cubes[i + 2]);
-		//model = glm::translate(model, translationModel);
+		// Logica de renderizacao e de meshes
 
-		// glUniformMatrix4fv(modelLoc, 1, FALSE, glm::value_ptr(model));
-		// Chamada de desenho - drawcall
-		// Poligono Preenchido - GL_TRIANGLES
+		Mesh planeta = meshes.find("Planeta")->second;
+		BezierCurve orbitaTerra = bezierCurves.find("OrbitaTerra")->second;
+		planeta.position = orbitaTerra.curvePoints[j];
+		meshes["Planeta"] = planeta;
 
-		// Planeta
+		Mesh lua = meshes.find("Lua")->second;
+		BezierCurve orbitaLua = bezierCurves.find("OrbitaLua")->second;
+		lua.position = orbitaLua.curvePoints[i] + planeta.position;
+		meshes["Lua"] = lua;
 
-		model = glm::mat4(1);
-		scaleModel = glm::vec3(scale, scale, scale);
-		// O planeta é rotacionado a cada frame no eixo Y
-		model = glm::rotate(model, glm::radians(0.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-		model = glm::rotate(model, glm::radians(angle), glm::vec3(0.0f, 1.0f, 0.0f));
-		model = glm::rotate(model, glm::radians(0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		model = glm::scale(model, scaleModel);
-		glUniformMatrix4fv(modelLoc, 1, FALSE, glm::value_ptr(model));
+		for (auto& m : meshes) {
+			Mesh mesh = m.second;
+			bool isSelected = meshList.at(currentlySelectedMesh % meshList.size()) == m.first && currentlySelectedMesh != -1;
+			GLuint shaderId = objectShader.getId();
+			glm::mat4 model = glm::mat4(1);
 
-		glBindVertexArray(VAO);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, textureID);
-		glDrawArrays(GL_TRIANGLES, 0, vertices.size());
-		glBindVertexArray(0);
+			glm::vec3 position = mesh.position;
+			if (isSelected) position = position + glm::vec3(selectedMeshPosition.x, selectedMeshPosition.y, 0.0f);
+			model = glm::translate(model, position);
 
-		// Lua
+			glm::vec3 angle = mesh.incrementalAngle ? glm::vec3(incrementalAngle) : mesh.angle;
+			if (isSelected && selectedMeshAngle != 0.0f) angle = angle * glm::vec3(selectedMeshAngle, selectedMeshAngle, selectedMeshAngle);
+			model = glm::rotate(model, glm::radians(angle.x), mesh.rotation);
+			model = glm::rotate(model, glm::radians(angle.y), mesh.rotation);
+			model = glm::rotate(model, glm::radians(angle.z), mesh.rotation);
 
-		model = glm::mat4(1);
-		scaleModel = glm::vec3(scale / 3.0f, scale / 3.0f , scale / 3.0f);
-		// A Lua é inicialmente posicionada no 0,0, então para posiciona-la no ponto atual da curva, uso o translate
-		model = glm::translate(model, moonOrbitCurve.curvePoints[i]);
-		model = glm::scale(model, scaleModel);
-		glUniformMatrix4fv(modelLoc, 1, FALSE, glm::value_ptr(model));
+			glm::vec3 scale = mesh.scale;
+			if (isSelected) scale = scale * glm::vec3(selectedMeshScale, selectedMeshScale, selectedMeshScale);
+			model = glm::scale(model, scale);
 
-		glBindVertexArray(VAOLua);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, textureIDLua);
-		glDrawArrays(GL_TRIANGLES, 0, verticesLua.size());
-		glBindVertexArray(0);
+			// Model
+			glUniformMatrix4fv(glGetUniformLocation(shaderId, "model"), 1, FALSE, glm::value_ptr(model));
 
-		// Curvas
+			// Material uniforms
+			glUniform1f(glGetUniformLocation(shaderId, "kaR"), mesh.material.kaR);
+			glUniform1f(glGetUniformLocation(shaderId, "kaG"), mesh.material.kaG);
+			glUniform1f(glGetUniformLocation(shaderId, "kaB"), mesh.material.kaB);
+			glUniform1f(glGetUniformLocation(shaderId, "kdR"), mesh.material.kdR);
+			glUniform1f(glGetUniformLocation(shaderId, "kdG"), mesh.material.kdG);
+			glUniform1f(glGetUniformLocation(shaderId, "kdB"), mesh.material.kdB);
+			glUniform1f(glGetUniformLocation(shaderId, "ksR"), mesh.material.ksR);
+			glUniform1f(glGetUniformLocation(shaderId, "ksG"), mesh.material.ksG);
+			glUniform1f(glGetUniformLocation(shaderId, "ksB"), mesh.material.ksB);
+			glUniform1f(glGetUniformLocation(shaderId, "ns"), mesh.material.ns);
 
-		glUseProgram(lineShader.getId());
+			if (isSelected) glUniform3f(glGetUniformLocation(objectShader.getId(), "extraColor"), 0.3f, 0.5f, 0.9f);
+			else glUniform3f(glGetUniformLocation(objectShader.getId(), "extraColor"), 0.0f, 0.0f, 0.0f);
 
-		glUniformMatrix4fv(glGetUniformLocation(lineShader.getId(), "view"), 1, GL_FALSE, glm::value_ptr(view));
+			if (m.first == "Sol") glUniform1i(glGetUniformLocation(objectShader.getId(), "skipLighting"), 1);
+			else glUniform1i(glGetUniformLocation(objectShader.getId(), "skipLighting"), 0);
 
-		// Curva vermelha do circulo
-		glUniform4f(glGetUniformLocation(lineShader.getId(), "finalColor"), 1.0f, 0.0f, 0.0f, 1.0f);
-		glBindVertexArray(moonOrbitCurve.VAO);
-		glDrawArrays(GL_LINE_STRIP, 0, moonOrbitCurve.curvePoints.size());
-		glBindVertexArray(0);
+			glBindVertexArray(mesh.VAO);
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, mesh.textureID);
+			glDrawArrays(GL_TRIANGLES, 0, mesh.vertices.size());
+			glBindVertexArray(0);
+		}
 
-		// Pontos amarelos que indicam os pontos de controle
-		glUniform4f(glGetUniformLocation(lineShader.getId(), "finalColor"), 1.0f, 1.0f, 0.0f, 1.0f);
-		glBindVertexArray(pointsVAO);
-		glDrawArrays(GL_POINTS, 0, controlPoints.size());
-		glBindVertexArray(0);
+		// Renderizacao de curvas
+		if (showCurves) {
+			glUseProgram(lineShader.getId());
 
-		// Linhas verdes que conectam os pontos de controle
-		glUniform4f(glGetUniformLocation(lineShader.getId(), "finalColor"), 0.0f, 1.0f, 0.0f, 1.0f);
-		glBindVertexArray(pointsVAO);
-		glDrawArrays(GL_LINE_STRIP, 0, controlPoints.size());
-		glBindVertexArray(0);
+			glUniformMatrix4fv(glGetUniformLocation(lineShader.getId(), "view"), 1, GL_FALSE, glm::value_ptr(view));
 
-		i = (i + 20) % nbCurvePoints;
+			for (auto& b : bezierCurves) {
+				BezierCurve bezierCurve = b.second;
+				//cout << "Rendering: " << b.first << "\n";
+				GLuint shaderId = lineShader.getId();
+
+				glUniform4f(glGetUniformLocation(shaderId, "finalColor"), bezierCurve.color.r, bezierCurve.color.g, bezierCurve.color.b, bezierCurve.color.a);
+
+				// Render curve
+				glBindVertexArray(bezierCurve.VAO);
+				glDrawArrays(GL_LINE_STRIP, 0, bezierCurve.curvePoints.size());
+				glBindVertexArray(0);
+
+				glUniform4f(glGetUniformLocation(shaderId, "finalColor"), 1.0f, 1.0f, 0.0f, 1.0f);
+
+				// Render individual control points
+				glBindVertexArray(bezierCurve.controlPointsVAO);
+				glDrawArrays(GL_POINTS, 0, bezierCurve.controlPoints.size());
+				glBindVertexArray(0);
+
+				glUniform4f(glGetUniformLocation(shaderId, "finalColor"), 0.0f, 1.0f, 0.0f, 1.0f);
+
+				// Render lines between the control points
+				glBindVertexArray(bezierCurve.controlPointsVAO);
+				glDrawArrays(GL_LINE_STRIP, 0, bezierCurve.controlPoints.size());
+				glBindVertexArray(0);
+			}
+		}
+
+		// Valores i e j sao usados para fazer a revolucao da lua e do planeta
+		i = (i + 36) % orbitaLua.curvePoints.size();
+		j = (j + 5) % orbitaTerra.curvePoints.size();
 		// Valor de angle é usado para rotacionar os objetos
-		if (angle < 360.0f) angle += 0.1f;
-		else angle = 0.0f;
+		if (incrementalAngle < 360.0f) incrementalAngle += 0.1f;
+		else incrementalAngle = 0.0f;
 
 		// Troca os buffers da tela
 		glfwSwapBuffers(window);
 	}
+
 	// Pede pra OpenGL desalocar os buffers
-	glDeleteVertexArrays(1, &VAO);
-	glDeleteVertexArrays(1, &moonOrbitCurve.VAO);
-	glDeleteVertexArrays(1, &pointsVAO);
+	for (auto& m : meshes) glDeleteVertexArrays(1, &m.second.VAO);
+	for (auto& b : bezierCurves) glDeleteVertexArrays(1, &b.second.VAO);
+
 	// Finaliza a execução da GLFW, limpando os recursos alocados por ela
 	glfwTerminate();
 	return 0;
 }
 
-vector<Vertex> setupObj(string path) {
-	vector<Vertex> vertices;
-	ifstream file(path);
-	string line;
-	vector<glm::vec3> temp_positions;
-	vector<glm::vec2> temp_texcoords;
-	vector<glm::vec3> temp_normals;
+void readSceneFile(std::string sceneFilePath, std::unordered_map<std::string, Mesh>* meshes, std::vector<std::string>* meshList, std::unordered_map<std::string, BezierCurve>* bezierCurves, GlobalConfig* globalConfig) {
+	std::ifstream file(sceneFilePath);
+	std::string line;
 
 	if (!file.is_open()) {
-		cerr << "Failed to open file" << path << endl;
+		std::cerr << "Failed to open file " << sceneFilePath << std::endl;
+		return;
+	}
+
+	std::string objectType;
+	std::string name;
+
+	// Global config attributes
+	glm::vec3 lightPos, lightColor;
+	glm::vec3 cameraPos, cameraFront;
+	GLfloat fov, nearPlane, farPlane, sensitivity, cameraSpeed;
+
+	// Mesh attributes
+	std::string objFilePath, mtlFilePath;
+	glm::vec3 scale, position, rotation, angle;
+	GLuint incrementalAngle = false;
+
+	// Bezier curve attributes
+	std::vector<glm::vec3> tempControlPoints;
+	GLuint pointsPerSegment = 0;
+	glm::vec4 color;
+	glm::vec3 orbit;
+	GLfloat radius;
+	GLuint usingOrbit = false;
+
+	while (getline(file, line)) {
+		std::istringstream ss(line);
+		std::string type;
+
+		ss >> type;
+
+		if (type == "Type") ss >> objectType >> name;
+		// GlobalConfig
+		else if (type == "LightPos" && objectType == "GlobalConfig") ss >> lightPos.x >> lightPos.y >> lightPos.z;
+		else if (type == "LightColor" && objectType == "GlobalConfig") ss >> lightColor.r >> lightColor.g >> lightColor.b;
+		else if (type == "CameraPos" && objectType == "GlobalConfig") ss >> cameraPos.x >> cameraPos.y >> cameraPos.z;
+		else if (type == "CameraFront" && objectType == "GlobalConfig") ss >> cameraFront.x >> cameraFront.y >> cameraFront.z;
+		else if (type == "Fov" && objectType == "GlobalConfig") ss >> fov;
+		else if (type == "NearPlane" && objectType == "GlobalConfig") ss >> nearPlane;
+		else if (type == "FarPlane" && objectType == "GlobalConfig") ss >> farPlane;
+		else if (type == "Sensitivity" && objectType == "GlobalConfig") ss >> sensitivity;
+		else if (type == "CameraSpeed" && objectType == "GlobalConfig") ss >> cameraSpeed;
+		// Mesh
+		else if (type == "Obj" && objectType == "Mesh") ss >> objFilePath;
+		else if (type == "Mtl" && objectType == "Mesh") ss >> mtlFilePath;
+		else if (type == "Scale" && objectType == "Mesh") ss >> scale.x >> scale.y >> scale.z;
+		else if (type == "Position" && objectType == "Mesh") ss >> position.x >> position.y >> position.z;
+		else if (type == "Rotation" && objectType == "Mesh") ss >> rotation.x >> rotation.y >> rotation.z;
+		else if (type == "Angle" && objectType == "Mesh") ss >> angle.x >> angle.y >> angle.z;
+		else if (type == "IncrementalAngle" && objectType == "Mesh") ss >> incrementalAngle;
+		// Bezier curve
+		else if (type == "ControlPoint" && objectType == "BezierCurve") {
+			glm::vec3 controlPoint;
+			ss >> controlPoint.x >> controlPoint.y >> controlPoint.z;
+
+			tempControlPoints.push_back(controlPoint);
+			usingOrbit = false;
+		}
+		else if (type == "PointsPerSegment" && objectType == "BezierCurve") ss >> pointsPerSegment;
+		else if (type == "Color" && objectType == "BezierCurve") ss >> color.r >> color.g >> color.b >> color.a;
+		else if (type == "Orbit" && objectType == "BezierCurve") {
+			ss >> orbit.x >> orbit.y >> orbit.z;
+			usingOrbit = true;
+		}
+		else if (type == "Radius" && objectType == "BezierCurve") ss >> radius;
+		else if (type == "End") {
+			if (objectType == "GlobalConfig") {
+				globalConfig->lightPos = lightPos;
+				globalConfig->lightColor = lightColor;
+				globalConfig->cameraPos = cameraPos;
+				globalConfig->cameraFront = cameraFront;
+				globalConfig->nearPlane = nearPlane;
+				globalConfig->farPlane = farPlane;
+				globalConfig->fov = fov;
+				globalConfig->sensitivity = sensitivity;
+				globalConfig->cameraSpeed = cameraSpeed;
+			}
+			else if (objectType == "Mesh") {
+				Mesh mesh;
+
+				std::vector<Vertex> vertices = setupObj(objFilePath);
+				GLuint VAO = setupGeometry(vertices);
+				Material material = setupMtl(mtlFilePath);
+				GLuint textureID = setupTexture(material.textureName);
+
+				mesh.name = name;
+				mesh.vertices = vertices;
+				mesh.VAO = VAO;
+				mesh.material = material;
+				mesh.textureID = textureID;
+				mesh.position = position;
+				mesh.rotation = rotation;
+				mesh.scale = scale;
+				mesh.angle = angle;
+				mesh.incrementalAngle = incrementalAngle;
+
+				//std::cout << "Created: " << objFilePath;
+				meshes->insert(make_pair(name, mesh));
+				meshList->push_back(name);
+			}
+			else if (objectType == "BezierCurve") {
+				BezierCurve bezierCurve;
+				std::vector<glm::vec3> controlPoints = std::vector<glm::vec3>();
+
+				if (usingOrbit) controlPoints = generateCircleControlPoints(orbit, radius);
+				else controlPoints = tempControlPoints;
+				bezierCurve = createBezierCurve(controlPoints, pointsPerSegment);
+				GLuint controlPointsVAO = generateControlPointsBuffer(controlPoints);
+
+				bezierCurve.name = name;
+				bezierCurve.controlPoints = controlPoints;
+				bezierCurve.color = color;
+				bezierCurve.pointsPerSegment = pointsPerSegment;
+				if (usingOrbit) bezierCurve.orbit = orbit;
+				if (usingOrbit) bezierCurve.radius = radius;
+				bezierCurve.controlPointsVAO = controlPointsVAO;
+
+				bezierCurves->insert(make_pair(name, bezierCurve));
+				tempControlPoints.clear();
+			}
+		}
+	}
+
+	file.close();
+	return;
+}
+
+std::vector<Vertex> setupObj(std::string path) {
+	std::vector<Vertex> vertices;
+	std::ifstream file(path);
+	std::string line;
+	std::vector<glm::vec3> temp_positions;
+	std::vector<glm::vec2> temp_texcoords;
+	std::vector<glm::vec3> temp_normals;
+
+	if (!file.is_open()) {
+		std::cerr << "Failed to open file" << path << std::endl;
 		return vertices;
 	}
 
 	while (getline(file, line)) {
-		istringstream ss(line);
-		string type;
+		std::istringstream ss(line);
+		std::string type;
 		ss >> type;
 
 		if (type == "v") {
@@ -355,12 +479,12 @@ vector<Vertex> setupObj(string path) {
 			temp_normals.push_back(normal);
 		}
 		else if (type == "f") {
-			string vertex1, vertex2, vertex3;
+			std::string vertex1, vertex2, vertex3;
 			ss >> vertex1 >> vertex2 >> vertex3;
 			int vIndex[3], tIndex[3], nIndex[3];
 
 			for (int i = 0; i < 3; i++) {
-				string vertex = (i == 0) ? vertex1 : (i == 1) ? vertex2 : vertex3;
+				std::string vertex = (i == 0) ? vertex1 : (i == 1) ? vertex2 : vertex3;
 				size_t pos1 = vertex.find('/');
 				size_t pos2 = vertex.find('/', pos1 + 1);
 
@@ -391,20 +515,20 @@ vector<Vertex> setupObj(string path) {
 	return vertices;
 }
 
-Material setupMtl(string path) {
-	string texturePath;
-	ifstream file(path);
-	string line;
+Material setupMtl(std::string path) {
+	std::string texturePath;
+	std::ifstream file(path);
+	std::string line;
 	Material material;
 
 	if (!file.is_open()) {
-		cerr << "Failed to open file" << path << endl;
+		std::cerr << "Failed to open file" << path << std::endl;
 		return material;
 	}
 
 	while (getline(file, line)) {
-		istringstream ss(line);
-		string type;
+		std::istringstream ss(line);
+		std::string type;
 		ss >> type;
 
 		if (type == "Ka") {
@@ -428,20 +552,7 @@ Material setupMtl(string path) {
 	return material;
 }
 
-void setupMtlUniforms(GLuint shaderProgram, Material material) {
-	glUniform1f(glGetUniformLocation(shaderProgram, "kaR"), material.kaR);
-	glUniform1f(glGetUniformLocation(shaderProgram, "kaG"), material.kaG);
-	glUniform1f(glGetUniformLocation(shaderProgram, "kaB"), material.kaB);
-	glUniform1f(glGetUniformLocation(shaderProgram, "kdR"), material.kdR);
-	glUniform1f(glGetUniformLocation(shaderProgram, "kdG"), material.kdG);
-	glUniform1f(glGetUniformLocation(shaderProgram, "kdB"), material.kdB);
-	glUniform1f(glGetUniformLocation(shaderProgram, "ksR"), material.ksR);
-	glUniform1f(glGetUniformLocation(shaderProgram, "ksG"), material.ksG);
-	glUniform1f(glGetUniformLocation(shaderProgram, "ksB"), material.ksB);
-	glUniform1f(glGetUniformLocation(shaderProgram, "ns"), material.ns);
-}
-
-GLuint setupTexture(string filename) {
+GLuint setupTexture(std::string filename) {
 	GLuint textureId;
 	glGenTextures(1, &textureId);
 	glBindTexture(GL_TEXTURE_2D, textureId);
@@ -468,7 +579,7 @@ GLuint setupTexture(string filename) {
 	}
 	else {
 		std::cout << "Failed to load texture" << std::endl;
-		
+
 	}
 
 	stbi_image_free(data);
@@ -492,7 +603,21 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 	if (key == GLFW_KEY_S && action == GLFW_RELEASE) moveS = false;
 	if (key == GLFW_KEY_D && action == GLFW_PRESS) moveD = true;
 	if (key == GLFW_KEY_D && action == GLFW_RELEASE) moveD = false;
-
+	if (key == GLFW_KEY_TAB && action == GLFW_PRESS) {
+		selectedMeshScale = 1.0f;
+		selectedMeshAngle = 0.0f;
+		selectedMeshPosition = glm::vec2(0.0f, 0.0f);
+		currentlySelectedMesh++;
+	}
+	if (key == GLFW_KEY_1 && action == GLFW_PRESS) selectedMeshScale += 0.2f;
+	if (key == GLFW_KEY_2 && action == GLFW_PRESS) selectedMeshScale -= 0.2f;
+	if (key == GLFW_KEY_3 && action == GLFW_PRESS) selectedMeshAngle += 0.2f;
+	if (key == GLFW_KEY_4 && action == GLFW_PRESS) selectedMeshAngle -= 0.2f;
+	if (key == GLFW_KEY_UP && action == GLFW_PRESS) selectedMeshPosition.y += 0.3f;
+	if (key == GLFW_KEY_DOWN && action == GLFW_PRESS) selectedMeshPosition.y -= 0.3f;
+	if (key == GLFW_KEY_RIGHT && action == GLFW_PRESS) selectedMeshPosition.x += 0.3f;
+	if (key == GLFW_KEY_LEFT && action == GLFW_PRESS) selectedMeshPosition.x -= 0.3f;
+	if (key == GLFW_KEY_F1 && action == GLFW_PRESS) showCurves = !showCurves;
 }
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos)
@@ -510,8 +635,8 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 	lastX = xpos;
 	lastY = ypos;
 
-	offsetx *= sensitivity;
-	offsety *= sensitivity;
+	offsetx *= globalConfig.sensitivity;
+	offsety *= globalConfig.sensitivity;
 
 	pitch += offsety;
 	yaw += offsetx;
@@ -520,7 +645,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 	front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
 	front.y = sin(glm::radians(pitch));
 	front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
-	cameraFront = glm::normalize(front);
+	globalConfig.cameraFront = glm::normalize(front);
 }
 
 // Esta função está bastante harcoded - objetivo é criar os buffers que armazenam a 
@@ -528,7 +653,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 // Apenas atributo coordenada nos vértices
 // 1 VBO com as coordenadas, VAO com apenas 1 ponteiro para atributo
 // A função retorna o identificador do VAO
-int setupGeometry(vector<Vertex>& vertices) {
+int setupGeometry(std::vector<Vertex>& vertices) {
 	GLuint VBO, VAO;
 
 	glGenBuffers(1, &VBO);
@@ -564,8 +689,8 @@ int setupGeometry(vector<Vertex>& vertices) {
 	Gera pontos de controle que quando combinados, gerarão um círculo ao redor do ponto de referência
 	("referencePoint") com raio "radius". O ponto de referencia é um valor no espaço 3d (x, y, z)
 */
-vector<glm::vec3> generateCircleControlPoints(glm::vec3 referencePoint, float radius) {
-	vector <glm::vec3> controlPoints;
+std::vector<glm::vec3> generateCircleControlPoints(glm::vec3 referencePoint, float radius) {
+	std::vector <glm::vec3> controlPoints;
 
 	float refX = referencePoint.x;
 	float refY = referencePoint.y;
@@ -621,7 +746,7 @@ vector<glm::vec3> generateCircleControlPoints(glm::vec3 referencePoint, float ra
 	return controlPoints;
 }
 
-GLuint generateControlPointsBuffer(vector <glm::vec3> controlPoints) {
+GLuint generateControlPointsBuffer(std::vector<glm::vec3> controlPoints) {
 
 	GLuint VBO, VAO;
 
@@ -666,7 +791,7 @@ BezierCurve createBezierCurve(std::vector <glm::vec3> controlPoints, int pointsP
 
 	BezierCurve bezierCurve;
 	GLuint VAO;
-	vector<glm::vec3> curvePoints;
+	std::vector<glm::vec3> curvePoints;
 	float step = 1.0 / (float)pointsPerSegment;
 	float t = 0;
 	int nControlPoints = controlPoints.size();

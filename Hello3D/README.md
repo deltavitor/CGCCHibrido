@@ -4,6 +4,7 @@ Referências:
 - https://stackoverflow.com/questions/1734745/how-to-create-circle-with-b%C3%A9zier-curves (Textura do Sol; o OBJ é o mesmo do planeta)
 - https://learnopengl.com/ (para questões de OpenGL no geral)
 - https://www.learncpp.com/ (para questões gerais de C++, como criação de classes, etc)
+- https://www.learncpp.com/cpp-tutorial/classes-and-header-files/ (criação de classes e de headers)
 - https://www.geeksforgeeks.org/ (outro para questões gerais de C++)
 - https://stackoverflow.com/ (muito StackOverflow, várias perguntas e respostas diferentes)
 - https://community.khronos.org/ (para outras questões de OpenGL, GLM, etc.)

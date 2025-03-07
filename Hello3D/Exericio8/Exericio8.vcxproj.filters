@@ -13,6 +13,9 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="shaders">
+      <UniqueIdentifier>{2aed0568-99d0-49be-b5cd-fa2a9f57fa84}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Origem.cpp">
@@ -21,5 +24,65 @@
     <ClCompile Include="..\glad.c">
       <Filter>Arquivos de Origem</Filter>
     </ClCompile>
+    <ClCompile Include="Shader.cpp">
+      <Filter>Arquivos de Origem</Filter>
+    </ClCompile>
+    <ClCompile Include="Mesh.cpp">
+      <Filter>Arquivos de Origem</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Shader.h">
+      <Filter>Arquivos de Cabeçalho</Filter>
+    </ClInclude>
+    <ClInclude Include="Mesh.h">
+      <Filter>Arquivos de Cabeçalho</Filter>
+    </ClInclude>
+    <ClInclude Include="Vertex.h">
+      <Filter>Arquivos de Cabeçalho</Filter>
+    </ClInclude>
+    <ClInclude Include="Material.h">
+      <Filter>Arquivos de Cabeçalho</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\shaders\Object.fs">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\shaders\Object.vs">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\shaders\Line.fs">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\shaders\Line.vs">
+      <Filter>shaders</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="Backup.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
+    <Text Include="Backup good 2.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
+    <Text Include="Backup leitura de curvas da scene.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
+    <Text Include="Backup com map e configuracao de curvas.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
+    <Text Include="Backup camera global config.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
+    <Text Include="Pretty much done.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
+    <Text Include="Organizing backup.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
+    <Text Include="broken.txt">
+      <Filter>Arquivos de Origem</Filter>
+    </Text>
   </ItemGroup>
 </Project>
